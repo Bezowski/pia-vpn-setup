@@ -1,0 +1,17 @@
+[Unit]
+Description=PIA port forwarding manager
+After=network-online.target wg-quick@pia.service
+Wants=network-online.target
+#BindsTo=wg-quick@pia.service
+
+[Service]
+Type=simple
+ExecStart=/bin/bash /usr/local/bin/pia-port-forward-wrapper.sh
+Restart=always
+RestartSec=15
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

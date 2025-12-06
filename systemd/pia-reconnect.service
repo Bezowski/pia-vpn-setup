@@ -1,0 +1,6 @@
+[Unit]
+Description=Reset PIA port forwarding on reconnect
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'rm -f /var/lib/pia/forwarded_port && systemctl restart pia-port-forward.service && sleep 5 && /usr/local/bin/update-firewall-for-port.sh'

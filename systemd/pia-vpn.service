@@ -1,0 +1,19 @@
+[Unit]
+Description=Runs PIA over WireGuard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+#Comment out RemainAfterExit=yes to have this service run on resume from suspend
+RemainAfterExit=yes
+WorkingDirectory=/usr/local/bin/manual-connections
+TimeoutStartSec=5min
+ExecStartPre=/bin/sleep 2
+ExecStart=/bin/bash /usr/local/bin/pia-renew-and-connect.sh
+Restart=on-failure
+User=root
+
+[Install]
+WantedBy=multi-user.target
+
