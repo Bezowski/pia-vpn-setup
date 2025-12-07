@@ -25,11 +25,11 @@ chmod +x /usr/local/bin/pia-renew-and-connect.sh
 chmod +x /usr/local/bin/pia-port-forward-wrapper.sh
 chmod +x /usr/local/bin/update-firewall-for-port.sh
 
-# Clone PIA manual connections scripts
-echo "Downloading PIA manual-connections scripts..."
+# Copy PIA manual connections scripts (with our modifications)
+echo "Installing PIA manual-connections scripts..."
 mkdir -p /usr/local/bin/manual-connections
-cd /usr/local/bin/manual-connections
-git clone https://github.com/pia-foss/manual-connections.git .
+cp -r manual-connections/* /usr/local/bin/manual-connections/
+chmod +x /usr/local/bin/manual-connections/*.sh
 
 # Copy systemd units
 echo "Installing systemd units..."

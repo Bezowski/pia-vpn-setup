@@ -73,6 +73,15 @@ Manual VPN restart:
 sudo systemctl restart pia-vpn.service
 ```
 
+## Modified Scripts
+
+The following PIA manual-connections scripts have been modified from the original:
+
+- `port_forwarding.sh` - Updated permissions for forwarded_port file (644 instead of 600)
+- `connect_to_wireguard_with_token.sh` - Added Network Manager applet reload
+
+Original scripts: https://github.com/pia-foss/manual-connections
+
 ## Credits
 
 Setup created with assistance from Claude (Anthropic).
