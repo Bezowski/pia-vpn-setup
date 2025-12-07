@@ -54,7 +54,7 @@ fi
 
 # Create persistence directory
 mkdir -p /var/lib/pia
-chmod 0700 /var/lib/pia
+chmod 0755 /var/lib/pia
 
 # Copy Bluetooth config
 echo "Configuring Bluetooth..."

@@ -46,7 +46,7 @@ fi
 # --- persist region (hostname + gateway) for pia-port-forward ---
 PERSIST_DIR=/var/lib/pia
 mkdir -p "$PERSIST_DIR"
-chmod 0700 "$PERSIST_DIR"
+chmod 0755 "$PERSIST_DIR"
 TMP="$PERSIST_DIR/region.txt.tmp"
 HOSTNAME=""
 GATEWAY=""
