@@ -1,12 +1,12 @@
 [Unit]
 Description=PIA port forwarding manager
-After=network-online.target wg-quick@pia.service
+After=network-online.target pia-vpn.service
 Wants=network-online.target
-#BindsTo=wg-quick@pia.service
+BindsTo=pia-vpn.service
 
 [Service]
 Type=simple
-ExecStart=/bin/bash /usr/local/bin/pia-port-forward-wrapper.sh
+ExecStart=/usr/local/bin/pia-port-forward-check.sh
 Restart=always
 RestartSec=15
 User=root

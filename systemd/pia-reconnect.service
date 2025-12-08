@@ -3,4 +3,4 @@ Description=Reset PIA port forwarding on reconnect
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c 'rm -f /var/lib/pia/forwarded_port && systemctl restart pia-port-forward.service && sleep 5 && /usr/local/bin/update-firewall-for-port.sh'
+ExecStart=/bin/bash -c '. /etc/pia-credentials; if [ "${PIA_PF:-false}" = "true" ]; then rm -f /var/lib/pia/forwarded_port && systemctl restart pia-port-forward.service && sleep 5 && /usr/local/bin/update-firewall-for-port.sh; else echo "Port forwarding disabled (PIA_PF=${PIA_PF:-false})"; fi'
