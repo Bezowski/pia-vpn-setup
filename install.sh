@@ -71,8 +71,6 @@ cp systemd/pia-renew.timer /etc/systemd/system/
 cp systemd/pia-port-forward.service /etc/systemd/system/
 cp systemd/pia-reconnect.service /etc/systemd/system/
 cp systemd/pia-reconnect.path /etc/systemd/system/
-mkdir -p /etc/systemd/system/bluetooth.service.d
-cp -r systemd/bluetooth.service.d/* /etc/systemd/system/bluetooth.service.d/
 
 # Setup credentials
 echo
@@ -88,10 +86,6 @@ fi
 mkdir -p /var/lib/pia
 chmod 0755 /var/lib/pia
 
-# Copy Bluetooth config
-echo "Configuring Bluetooth..."
-cp config/main.conf /etc/bluetooth/main.conf
-
 # Reload systemd
 echo "Reloading systemd..."
 systemctl daemon-reload
@@ -102,9 +96,6 @@ systemctl enable pia-vpn.service
 systemctl enable pia-renew.timer
 systemctl enable pia-port-forward.service
 systemctl enable pia-reconnect.path
-
-# Restart Bluetooth
-systemctl restart bluetooth
 
 echo
 echo "Installation complete!"
