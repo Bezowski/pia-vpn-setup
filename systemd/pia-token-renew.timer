@@ -1,0 +1,12 @@
+[Unit]
+Description=Renew PIA token every 23 hours (no VPN reconnect)
+
+[Timer]
+# Run every 23 hours - token lasts 24 hours, so this keeps it fresh
+OnBootSec=23h
+OnUnitActiveSec=23h
+AccuracySec=1s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

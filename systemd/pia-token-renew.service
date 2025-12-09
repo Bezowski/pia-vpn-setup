@@ -1,0 +1,14 @@
+[Unit]
+Description=Renew PIA authentication token (without VPN reconnect)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/bin/pia-renew-token-only.sh
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

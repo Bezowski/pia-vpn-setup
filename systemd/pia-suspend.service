@@ -1,0 +1,14 @@
+[Unit]
+Description=Handle PIA VPN on suspend/resume
+Before=sleep.target
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /usr/local/bin/pia-suspend-handler.sh pre
+ExecStop=/bin/bash /usr/local/bin/pia-suspend-handler.sh post
+User=root
+
+[Install]
+WantedBy=sleep.target
