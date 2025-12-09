@@ -5,10 +5,10 @@ Automated PIA VPN setup with WireGuard, port forwarding, and systemd integration
 ## Features
 
 - ✅ Automatic VPN connection on boot
-- ✅ Token renewal every 23 hours
+- ✅ Tests all regions on boot, connects to fastest
+- ✅ Token renewal every 23 hours (silent, no VPN disconnection)
 - ✅ Automatic port forwarding with firewall updates
-- ✅ Toggle port forwarding on/off via config file
-- ✅ Survives suspend/resume
+- ✅ Survives suspend/resume (maintains port)
 - ✅ Lightweight (no GUI client needed)
 
 ## Requirements
@@ -32,14 +32,30 @@ sudo ./install.sh
 
 3. Edit credentials:
 ```bash
-sudo nano /etc/pia-credentials
+sudo xed /etc/pia-credentials
 ```
 
-Add your PIA username, password, and set `PIA_PF="true"` to enable port forwarding (or `"false"` to disable).
+Add your PIA username, password, and desired settings.
 
 4. Reboot:
 ```bash
 sudo reboot
+```
+
+## Configuration
+
+Edit `/etc/pia-credentials` to customize your setup:
+
+```bash
+PIA_USER="p1234567"              # Your PIA username
+PIA_PASS="your_password"         # Your PIA password
+PREFERRED_REGION=none            # Set to region code or 'none' for auto-select
+AUTOCONNECT=true                 # Auto-select fastest region (true/false)
+MAX_LATENCY=0.2                  # Max latency in seconds for region testing
+VPN_PROTOCOL="wireguard"         # wireguard or openvpn
+DISABLE_IPV6="yes"               # Disable IPv6 leaks (yes/no)
+PIA_DNS="true"                   # Use PIA DNS (true/false)
+PIA_PF="true"                    # Enable port forwarding (true/false)
 ```
 
 ## Usage
@@ -55,88 +71,98 @@ View forwarded port:
 sudo cat /var/lib/pia/forwarded_port
 ```
 
-## Configuration
-
-Edit `/etc/pia-credentials` to customize your setup:
-
+View logs:
 ```bash
-PIA_USER="p1234567"              # Your PIA username
-PIA_PASS="your_password"         # Your PIA password
-PREFERRED_REGION="aus"           # Server region (aus, us-east, uk, etc.)
-AUTOCONNECT="false"              # Auto-select fastest server
-VPN_PROTOCOL="wireguard"         # wireguard or openvpn
-DISABLE_IPV6="yes"               # Disable IPv6 leaks
-PIA_DNS="true"                   # Use PIA DNS
-PIA_PF="true"                    # Enable port forwarding (true/false)
+journalctl -u pia-vpn.service -f
+journalctl -u pia-port-forward.service -f
+journalctl -u pia-token-renew.service -f
 ```
+
+## Services
+
+- **pia-vpn.service** - Connects to fastest PIA region on boot, detects existing connections to avoid reconnecting
+- **pia-token-renew.timer** - Renews authentication token every 23 hours (no VPN disconnection)
+- **pia-token-renew.service** - Silent token renewal service
+- **pia-port-forward.service** - Maintains port forwarding with automatic binding
+- **pia-suspend.service** - Handles suspend/resume, pauses port forwarding during sleep and resumes with same port
+
+## How It Works
+
+### On Boot
+1. Checks if VPN is already connected
+2. If not connected, tests all regions with `MAX_LATENCY` tolerance
+3. Connects to the fastest responding region
+4. Starts port forwarding (if `PIA_PF=true`)
+
+### Every 23 Hours
+1. Token renewal timer triggers
+2. Silently renews token without disconnecting VPN
+3. VPN remains active with no downtime
+4. Port forwarding automatically refreshes binding
+
+### On Suspend/Resume
+1. Before suspend: Port forwarding pauses (VPN stays connected)
+2. After resume: Port forwarding resumes with same port number
 
 ## Port Forwarding
 
 Enable/disable port forwarding by editing `/etc/pia-credentials`:
 
-**Enable port forwarding:**
 ```bash
-PIA_PF="true"
+PIA_PF="true"   # Enable port forwarding
+PIA_PF="false"  # Disable port forwarding
+```
+
+Then restart the port forwarding service:
+```bash
 sudo systemctl restart pia-port-forward.service
 ```
 
-**Disable port forwarding:**
+The forwarded port is stored in `/var/lib/pia/forwarded_port`:
 ```bash
-PIA_PF="false"
-sudo systemctl restart pia-port-forward.service
+sudo cat /var/lib/pia/forwarded_port
+# Output: PORT_NUMBER EXPIRY_TIMESTAMP
 ```
-
-The service will respect your setting and either start or stop port forwarding accordingly.
-
-## Services
-
-- `pia-vpn.service` - Connects VPN on boot
-- `pia-renew.timer` - Renews token every 23 hours
-- `pia-port-forward.service` - Maintains port forwarding (controlled by PIA_PF setting)
-- `pia-reconnect.path` - Auto-resets port forwarding on reconnect
 
 ## Troubleshooting
 
-View logs:
+**VPN not connecting:**
 ```bash
-# VPN service
+sudo systemctl status pia-vpn.service
 journalctl -u pia-vpn.service -f
-
-# Port forwarding service
-journalctl -u pia-port-forward.service -f
-
-# All PIA-related logs
-journalctl -g pia -f
 ```
 
-Manual VPN restart:
+**Port forwarding not working:**
+```bash
+sudo systemctl status pia-port-forward.service
+journalctl -u pia-port-forward.service -f
+```
+
+**Manual VPN restart:**
 ```bash
 sudo systemctl restart pia-vpn.service
 ```
 
-Check if port forwarding is enabled:
+**Check token renewal schedule:**
 ```bash
-sudo journalctl -u pia-port-forward.service -n 5
-# Look for "Port forwarding setting: PIA_PF=true" or "PIA_PF=false"
+sudo systemctl list-timers pia-token-renew.timer
+journalctl -u pia-token-renew.service --no-pager | tail -10
 ```
 
-## Architecture
+**Test VPN connection:**
+```bash
+# Check WireGuard interface
+ip link show pia
 
-The setup uses several components working together:
-
-- **pia-renew-and-connect.sh** - Renews token and connects to WireGuard VPN
-- **pia-port-forward-check.sh** - Checks `PIA_PF` setting before starting port forwarding
-- **pia-port-forward-wrapper.sh** - Wraps port forwarding script to read persistent region data
-- **port_forwarding.sh** - Handles the actual port forwarding with the PIA API
-- **pia-reconnect.path** - Watches for WireGuard config changes and resets port forwarding
+# Check your VPN IP
+curl -s https://api.ipify.org && echo
+```
 
 ## Modified Scripts
 
 The following PIA manual-connections scripts have been modified from the original:
 
-- `port_forwarding.sh` - Updated to persist forwarded port and token
-- `connect_to_wireguard_with_token.sh` - Added Network Manager applet reload
-- `pia-renew-and-connect.sh` - Separated port forwarding from VPN renewal
+- `connect_to_wireguard_with_token.sh` - Added Network Manager applet reload on connect
 
 Original scripts: https://github.com/pia-foss/manual-connections
 
