@@ -1,25 +1,7 @@
 #!/usr/bin/env bash
 # Copyright (C) 2020 Private Internet Access, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# [License header omitted for brevity]
 
-# This function allows you to check if the required tools have been installed.
 check_tool() {
   cmd=$1
   pkg=$2
@@ -30,22 +12,20 @@ check_tool() {
   fi
 }
 
-# Now we call the function to make sure we can use wg-quick, curl and jq.
 check_tool wg-quick wireguard-tools
 check_tool curl curl
 check_tool jq jq
 
-# Check if terminal allows output, if yes, define colors for output
 if [[ -t 1 ]]; then
   ncolors=$(tput colors)
   if [[ -n $ncolors && $ncolors -ge 8 ]]; then
-    red=$(tput setaf 1) # ANSI red
-    green=$(tput setaf 2) # ANSI green
-    nc=$(tput sgr0) # No Color
+    red=$(tput setaf 1)
+    green=$(tput setaf 2)
+    nc=$(tput sgr0)
   else
     red=''
     green=''
-    nc='' # No Color
+    nc=''
   fi
 fi
 
@@ -54,10 +34,6 @@ fi
 DEFAULT_PIA_CONF_PATH=/etc/wireguard/pia.conf
 : "${PIA_CONF_PATH:=$DEFAULT_PIA_CONF_PATH}"
 
-# PIA currently does not support IPv6. In order to be sure your VPN
-# connection does not leak, it is best to disabled IPv6 altogether.
-# IPv6 can also be disabled via kernel commandline param, so we must
-# first check if this is the case.
 if [[ -f /proc/net/if_inet6 ]] &&
   [[ $(sysctl -n net.ipv6.conf.all.disable_ipv6) -ne 1 ||
      $(sysctl -n net.ipv6.conf.default.disable_ipv6) -ne 1 ]]
@@ -67,7 +43,6 @@ then
   echo -e "sysctl -w net.ipv6.conf.default.disable_ipv6=1${nc}"
 fi
 
-# Check if the mandatory environment variables are set.
 if [[ -z $WG_SERVER_IP ||
       -z $WG_HOSTNAME ||
       -z $PIA_TOKEN ]]; then
@@ -87,18 +62,11 @@ if [[ -z $WG_SERVER_IP ||
   exit 1
 fi
 
-# Create ephemeral wireguard keys, that we don't need to save to disk.
 privKey=$(wg genkey)
 export privKey
 pubKey=$( echo "$privKey" | wg pubkey)
 export pubKey
 
-# Authenticate via the PIA WireGuard RESTful API.
-# This will return a JSON with data required for authentication.
-# The certificate is required to verify the identity of the VPN server.
-# In case you didn't clone the entire repo, get the certificate from:
-# https://github.com/pia-foss/manual-connections/blob/master/ca.rsa.4096.crt
-# In case you want to troubleshoot the script, replace -s with -v.
 echo "Trying to connect to the PIA WireGuard API on $WG_SERVER_IP..."
 if [[ -z $DIP_TOKEN ]]; then
   wireguard_json="$(curl -s -G \
@@ -117,30 +85,19 @@ else
 fi
 export wireguard_json
 
-# Check if the API returned OK and stop this script if it didn't.
 if [[ $(echo "$wireguard_json" | jq -r '.status') != "OK" ]]; then
   >&2 echo -e "${red}Server did not return OK. Stopping now.${nc}"
   exit 1
 fi
 
 if [[ $PIA_CONNECT == "true" ]]; then
-  # Ensure config file path is set to default used for WG connection
   PIA_CONF_PATH=$DEFAULT_PIA_CONF_PATH
-  # Multi-hop is out of the scope of this repo, but you should be able to
-  # get multi-hop running with both WireGuard and OpenVPN by playing with
-  # these scripts. Feel free to fork the project and test it out.
   echo
   echo "Trying to disable a PIA WG connection in case it exists..."
   wg-quick down pia && echo -e "${green}\nPIA WG connection disabled!${nc}"
   echo
 fi
 
-# Create the WireGuard config based on the JSON received from the API
-# In case you want this section to also add the DNS setting, please
-# start the script with PIA_DNS=true.
-# This uses a PersistentKeepalive of 25 seconds to keep the NAT active
-# on firewalls. You can remove that line if your network does not
-# require it.
 if [[ $PIA_DNS == "true" ]]; then
   dnsServer=$(echo "$wireguard_json" | jq -r '.dns_servers[0]')
   echo "Trying to set up DNS to $dnsServer. In case you do not have resolvconf,"
@@ -149,6 +106,7 @@ if [[ $PIA_DNS == "true" ]]; then
   echo
   dnsSettingForVPN="DNS = $dnsServer"
 fi
+
 echo -n "Trying to write ${PIA_CONF_PATH}..."
 mkdir -p "$(dirname "$PIA_CONF_PATH")"
 echo "
@@ -164,12 +122,7 @@ Endpoint = ${WG_SERVER_IP}:$(echo "$wireguard_json" | jq -r '.server_port')
 " > ${PIA_CONF_PATH} || exit 1
 echo -e "${green}OK!${nc}"
 
-
 if [[ $PIA_CONNECT == "true" ]]; then
-  # Start the WireGuard interface.
-  # If something failed, stop this script.
-  # If you get DNS errors because you miss some packages,
-  # just hardcode /etc/resolv.conf to "nameserver 10.0.0.242".
   echo
   echo "Trying to create the wireguard interface..."
   wg-quick up pia || exit 1
@@ -183,18 +136,15 @@ if [[ $PIA_CONNECT == "true" ]]; then
   --> ${green}wg-quick down pia${nc} <--
   "
 
+  echo "Reload Network Manager applet to remove duplicate 'pia' entries."
 
-echo "Reload Network Manager applet to remove duplicate 'pia' entries. Loaded from connect_to_wireguard_with_token.sh with code from claude.ai"
-
-# Detect the user logged into the graphical session
-REAL_USER=$(who | awk '{print $1}' | grep -v root | head -n1)
-if [ -z "$REAL_USER" ]; then
+  REAL_USER=$(who | awk '{print $1}' | grep -v root | head -n1)
+  if [ -z "$REAL_USER" ]; then
     echo "Warning: No graphical user session found, skipping applet reload" >&2
-else
+  else
     USER_ID=$(id -u "$REAL_USER")
     DISPLAY_NUM=":0"
     
-    # Reload the applet
     if sudo -u "$REAL_USER" \
         DISPLAY="$DISPLAY_NUM" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$USER_ID/bus" \
@@ -205,43 +155,11 @@ else
     else
         echo "Warning: Failed to reload Network Manager applet" >&2
     fi
-fi
-
-    #dbus-send --session --dest=org.Cinnamon.LookingGlass --type=method_call /org/Cinnamon/LookingGlass org.Cinnamon.LookingGlass.ReloadExtension string:'network@cinnamon.org' string:'APPLET'
-
-
-
-  # This section will stop the script if PIA_PF is not set to "true".
-  if [[ $PIA_PF != "true" ]]; then
-    echo "If you want to also enable port forwarding, you can start the script:"
-    echo -e "$ ${green}PIA_TOKEN=$PIA_TOKEN" \
-      "PF_GATEWAY=$WG_SERVER_IP" \
-      "PF_HOSTNAME=$WG_HOSTNAME" \
-      "./port_forwarding.sh${nc}"
-    echo
-    echo "The location used must be port forwarding enabled, or this will fail."
-    echo "Calling the ./get_region script with PIA_PF=true will provide a filtered list."
-    exit 1
   fi
 
-  echo -ne "This script got started with ${green}PIA_PF=true${nc}.
-
-  Starting port forwarding in "
-  for i in {5..1}; do
-    echo -n "$i..."
-    sleep 1
-  done
+  # NOTE: Port forwarding is now handled by pia-port-forward.service
+  # Do NOT call port_forwarding.sh here
   echo
-  echo
-
-  echo -e "Starting procedure to enable port forwarding by running the following command:
-  $ ${green}PIA_TOKEN=$PIA_TOKEN \\
-    PF_GATEWAY=$WG_SERVER_IP \\
-    PF_HOSTNAME=$WG_HOSTNAME \\
-    ./port_forwarding.sh${nc}"
-
-  PIA_TOKEN=$PIA_TOKEN \
-    PF_GATEWAY=$WG_SERVER_IP \
-    PF_HOSTNAME=$WG_HOSTNAME \
-    ./port_forwarding.sh
+  echo "Port forwarding is managed by the pia-port-forward.service"
+  echo "Check status with: systemctl status pia-port-forward.service"
 fi
