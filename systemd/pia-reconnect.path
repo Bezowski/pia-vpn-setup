@@ -1,8 +1,0 @@
-[Unit]
-Description=Watch for PIA VPN reconnection
-
-[Path]
-PathModified=/etc/wireguard/pia.conf
-
-[Install]
-WantedBy=multi-user.target

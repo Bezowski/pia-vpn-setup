@@ -18,44 +18,14 @@ apt install -y wireguard-tools curl jq openresolv
 
 # Copy scripts
 echo "Installing scripts..."
-cp scripts/pia-renew-and-connect.sh /usr/local/bin/
-cp scripts/pia-port-forward-wrapper.sh /usr/local/bin/
+cp scripts/pia-renew-and-connect-no-pf.sh /usr/local/bin/
+cp scripts/pia-renew-token-only.sh /usr/local/bin/
+cp scripts/pia-suspend-handler.sh /usr/local/bin/
 cp scripts/update-firewall-for-port.sh /usr/local/bin/
-chmod +x /usr/local/bin/pia-renew-and-connect.sh
-chmod +x /usr/local/bin/pia-port-forward-wrapper.sh
+chmod +x /usr/local/bin/pia-renew-and-connect-no-pf.sh
+chmod +x /usr/local/bin/pia-renew-token-only.sh
+chmod +x /usr/local/bin/pia-suspend-handler.sh
 chmod +x /usr/local/bin/update-firewall-for-port.sh
-
-# Create and install port forwarding check script
-echo "Creating port forwarding check script..."
-cat > /usr/local/bin/pia-port-forward-check.sh << 'EOF'
-#!/bin/bash
-# Wrapper script to check PIA_PF setting before running port forwarding
-
-set -euo pipefail
-
-CRED_FILE="/etc/pia-credentials"
-
-# Source the credentials file
-if [ -f "$CRED_FILE" ]; then
-    # shellcheck disable=SC1090
-    source "$CRED_FILE"
-fi
-
-# Default to false if not set
-: "${PIA_PF:=false}"
-
-echo "Port forwarding setting: PIA_PF=$PIA_PF"
-
-if [ "$PIA_PF" = "true" ]; then
-    echo "Starting port forwarding..."
-    exec /usr/local/bin/pia-port-forward-wrapper.sh
-else
-    echo "Port forwarding disabled (PIA_PF=$PIA_PF)"
-    # Keep the service alive so it doesn't restart constantly
-    sleep infinity
-fi
-EOF
-chmod +x /usr/local/bin/pia-port-forward-check.sh
 
 # Copy PIA manual connections scripts (with our modifications)
 echo "Installing PIA manual-connections scripts..."
@@ -66,11 +36,10 @@ chmod +x /usr/local/bin/manual-connections/*.sh
 # Copy systemd units
 echo "Installing systemd units..."
 cp systemd/pia-vpn.service /etc/systemd/system/
-cp systemd/pia-renew.service /etc/systemd/system/
-cp systemd/pia-renew.timer /etc/systemd/system/
+cp systemd/pia-token-renew.service /etc/systemd/system/
+cp systemd/pia-token-renew.timer /etc/systemd/system/
 cp systemd/pia-port-forward.service /etc/systemd/system/
-cp systemd/pia-reconnect.service /etc/systemd/system/
-cp systemd/pia-reconnect.path /etc/systemd/system/
+cp systemd/pia-suspend.service /etc/systemd/system/
 
 # Setup credentials
 echo
@@ -93,9 +62,9 @@ systemctl daemon-reload
 # Enable services
 echo "Enabling services..."
 systemctl enable pia-vpn.service
-systemctl enable pia-renew.timer
+systemctl enable pia-token-renew.timer
 systemctl enable pia-port-forward.service
-systemctl enable pia-reconnect.path
+systemctl enable pia-suspend.service
 
 echo
 echo "Installation complete!"
@@ -107,5 +76,5 @@ echo "3. Reboot your system"
 echo "4. Check status with: systemctl status pia-vpn.service"
 echo
 echo "To toggle port forwarding on/off later:"
-echo "  sudo nano /etc/pia-credentials  (change PIA_PF setting)"
+echo "  sudo xed /etc/pia-credentials  (change PIA_PF setting)"
 echo "  sudo systemctl restart pia-port-forward.service"
