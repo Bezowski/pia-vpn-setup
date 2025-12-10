@@ -83,7 +83,7 @@ journalctl -u pia-token-renew.service -f
 - **pia-vpn.service** - Connects to fastest PIA region on boot, detects existing connections to avoid reconnecting
 - **pia-token-renew.timer** - Renews authentication token every 23 hours (no VPN disconnection)
 - **pia-token-renew.service** - Silent token renewal service
-- **pia-port-forward.service** - Maintains port forwarding with automatic binding
+- **pia-port-forward.service** - Maintains port forwarding by running PIA's port_forwarding.sh with proper environment variables (PF_GATEWAY, PF_HOSTNAME, PIA_TOKEN). Automatically gets and refreshes forwarded ports every 15 minutes.
 - **pia-suspend.service** - Handles suspend/resume, pauses port forwarding during sleep and resumes with same port
 
 ## How It Works
