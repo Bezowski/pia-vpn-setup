@@ -83,8 +83,32 @@ journalctl -u pia-token-renew.service -f
 - **pia-vpn.service** - Connects to fastest PIA region on boot, detects existing connections to avoid reconnecting
 - **pia-token-renew.timer** - Renews authentication token every 23 hours (no VPN disconnection)
 - **pia-token-renew.service** - Silent token renewal service
-- **pia-port-forward.service** - Maintains port forwarding by running PIA's port_forwarding.sh with proper environment variables (PF_GATEWAY, PF_HOSTNAME, PIA_TOKEN). Automatically gets and refreshes forwarded ports every 15 minutes.
-- **pia-suspend.service** - Handles suspend/resume, pauses port forwarding during sleep and resumes with same port
+- **pia-port-forward.service** - Maintains port forwarding by running PIA's `port_forwarding.sh` script with environment variables (`PF_GATEWAY`, `PF_HOSTNAME`, `PIA_TOKEN`) automatically extracted from your VPN connection. Requests forwarded ports from PIA and refreshes bindings every 15 minutes to keep them active.
+- **pia-suspend.service** - Handles suspend/resume, pauses port forwarding during sleep and resumes with same port number
+
+## How Port Forwarding Works
+
+Port forwarding allows incoming connections on your forwarded port to reach applications like Nicotine+ running behind the VPN. Here's the flow:
+
+1. **On startup**: `pia-port-forward.service` extracts your VPN gateway IP and hostname from `/var/lib/pia/region.txt`
+2. **Gets a port**: Contacts PIA's API to request a forwarded port and receives a signature
+3. **Binds the port**: Uses the signature to bind the port on PIA's servers
+4. **Every 15 minutes**: Refreshes the binding to keep the port active (PIA ports expire after ~2 months if not refreshed)
+5. **Stores the port**: Writes the port number to `/var/lib/pia/forwarded_port` for use by applications and firewall rules
+
+The forwarded port is automatically added to your UFW firewall rules by `update-firewall-for-port.sh`, making it accessible from the internet.
+
+## Port Forwarding Limitations
+
+- **Application binding**: Some applications (like Nicotine+) may bind to specific interface IPs instead of all interfaces. This requires either:
+  - Using iptables NAT rules to redirect traffic (included in setup)
+  - Or configuring the application to listen on all interfaces (0.0.0.0)
+- **Port changes**: If you need a new forwarded port, stop and restart the service:
+  ```bash
+  sudo systemctl stop pia-port-forward.service
+  sudo rm /var/lib/pia/forwarded_port
+  sudo systemctl start pia-port-forward.service
+  ```
 
 ## How It Works
 
