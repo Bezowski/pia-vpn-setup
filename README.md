@@ -11,6 +11,33 @@ Automated PIA VPN setup with WireGuard, port forwarding, and systemd integration
 - ✅ Survives suspend/resume (maintains port)
 - ✅ Lightweight (no GUI client needed)
 
+## Suspend/Resume Support ✅
+
+Port forwarding now **survives suspend/resume** with zero manual intervention!
+
+**How it works:**
+- Suspend handler stops port-forward before sleep
+- On resume, it deletes the old port file
+- Fresh port is assigned from PIA (no signature mismatches)
+- Nicotine+ plugin detects port change within 30 seconds
+- Nicotine+ automatically reconnects to new port
+- External port test passes immediately
+
+**Testing:**
+Watch Nicotine+ logs for "Listening on port:" confirmation, then test:
+```bash
+PORT=$(cat /var/lib/pia/forwarded_port | awk '{print $1}')
+curl -s "https://www.slsknet.org/porttest.php?port=$PORT"
+```
+
+**Optional: Port Health Monitoring**
+Enable the port monitor to auto-reset on failures:
+```bash
+sudo systemctl enable pia-port-monitor.timer
+sudo systemctl start pia-port-monitor.timer
+```
+Runs every 30 minutes, checks port health, auto-resets if needed.
+
 ## Requirements
 
 - Ubuntu/Debian-based Linux (tested on Linux Mint)

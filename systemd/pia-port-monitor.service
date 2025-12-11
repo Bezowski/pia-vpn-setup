@@ -1,0 +1,15 @@
+[Unit]
+Description=Monitor PIA forwarded port and auto-reset if tests fail
+After=network-online.target pia-port-forward.service
+Wants=network-online.target
+BindsTo=pia-port-forward.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pia-port-monitor.sh
+StandardOutput=journal
+StandardError=journal
+User=root
+
+[Install]
+WantedBy=multi-user.target
