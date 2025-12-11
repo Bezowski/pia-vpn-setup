@@ -6,7 +6,13 @@ BindsTo=pia-vpn.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/pia-port-forward-check.sh
+WorkingDirectory=/usr/local/bin/manual-connections
+# Read the region file to get gateway and hostname
+EnvironmentFile=-/var/lib/pia/region.txt
+# Get token from file
+ExecStartPre=/bin/bash -c 'export PIA_TOKEN=$(head -1 /var/lib/pia/token.txt)'
+ExecStart=/bin/bash -c 'export PIA_TOKEN=$(head -1 /var/lib/pia/token.txt); export PF_GATEWAY=$(grep "^gateway=" /var/lib/pia/region.txt | cut -d= -f2); export PF_HOSTNAME=$(grep "^hostname=" /var/lib/pia/region.txt | cut -d= -f2); /usr/local/bin/manual-connections/port_forwarding.sh'
+ExecStartPost=/bin/bash -c 'sleep 3 && /usr/local/bin/update-firewall-for-port.sh'
 Restart=always
 RestartSec=15
 User=root
