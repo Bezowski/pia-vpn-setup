@@ -9,8 +9,8 @@ Type=simple
 WorkingDirectory=/usr/local/bin/manual-connections
 # Read the region file to get gateway and hostname
 EnvironmentFile=-/var/lib/pia/region.txt
-# Get token from file
-ExecStartPre=/bin/bash -c 'export PIA_TOKEN=$(head -1 /var/lib/pia/token.txt)'
+# Delete old port file to force fresh assignment, then get token
+ExecStartPre=/bin/bash -c 'rm -f /var/lib/pia/forwarded_port; export PIA_TOKEN=$(head -1 /var/lib/pia/token.txt)'
 ExecStart=/bin/bash -c 'export PIA_TOKEN=$(head -1 /var/lib/pia/token.txt); export PF_GATEWAY=$(grep "^gateway=" /var/lib/pia/region.txt | cut -d= -f2); export PF_HOSTNAME=$(grep "^hostname=" /var/lib/pia/region.txt | cut -d= -f2); /usr/local/bin/manual-connections/port_forwarding.sh'
 ExecStartPost=/bin/bash -c 'sleep 3 && /usr/local/bin/update-firewall-for-port.sh'
 Restart=always
