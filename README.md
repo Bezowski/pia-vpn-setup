@@ -4,8 +4,7 @@ Automated PIA VPN setup with WireGuard, port forwarding, and systemd integration
 
 ## Features
 
-- ✅ Automatic VPN connection on boot
-- ✅ Tests all regions on boot, connects to fastest
+- ✅ Automatic VPN connection on boot (fastest region)
 - ✅ Token renewal every 23 hours (silent, no VPN disconnection)
 - ✅ Automatic port forwarding with firewall updates
 - ✅ Survives suspend/resume seamlessly (fresh ports, zero manual intervention)
@@ -17,15 +16,14 @@ Automated PIA VPN setup with WireGuard, port forwarding, and systemd integration
 Port forwarding now **survives suspend/resume** with zero manual intervention!
 
 **How it works:**
-- Suspend handler stops port-forward before sleep
-- On resume, deletes old port file to force fresh assignment
-- Fresh port from PIA prevents signature/binding mismatches
+- Before suspend: Port forwarding pauses (VPN stays connected)
+- On resume: Gets fresh port from PIA to prevent binding failures
 - Nicotine+ plugin detects port change within 30 seconds
 - Nicotine+ automatically reconnects to new port
 - External port test passes immediately
 
 **Why fresh ports?**
-PIA's API binds each signature to a specific port. When you resume from suspend and request a new signature, you get a different port. Reusing the old port causes binding failures. Fresh ports ensure signature and port always match.
+PIA's API binds each signature to a specific port. When you resume and request a new signature, you get a different port. Fresh ports ensure signature and port always match - preventing binding failures.
 
 **Testing:**
 Watch Nicotine+ logs for "Listening on port:" confirmation, then test:
@@ -33,14 +31,6 @@ Watch Nicotine+ logs for "Listening on port:" confirmation, then test:
 PORT=$(cat /var/lib/pia/forwarded_port | awk '{print $1}')
 curl -s "https://www.slsknet.org/porttest.php?port=$PORT"
 ```
-
-**Optional: Port Health Monitoring**
-Enable the port monitor to check health and auto-reset on failures:
-```bash
-sudo systemctl enable pia-port-monitor.timer
-sudo systemctl start pia-port-monitor.timer
-```
-Runs every 30 minutes, checks port listening status and service health, auto-resets if needed.
 
 ## Requirements
 
@@ -67,7 +57,7 @@ sudo ./install.sh
 sudo xed /etc/pia-credentials
 ```
 
-Add your PIA username, password, and desired settings.
+Add your PIA username and password.
 
 4. Reboot:
 ```bash
@@ -84,7 +74,6 @@ PIA_PASS="your_password"         # Your PIA password
 PREFERRED_REGION=none            # Set to region code or 'none' for auto-select
 AUTOCONNECT=true                 # Auto-select fastest region (true/false)
 MAX_LATENCY=0.2                  # Max latency in seconds for region testing
-VPN_PROTOCOL="wireguard"         # wireguard or openvpn
 DISABLE_IPV6="yes"               # Disable IPv6 leaks (yes/no)
 PIA_DNS="true"                   # Use PIA DNS (true/false)
 PIA_PF="true"                    # Enable port forwarding (true/false)
@@ -112,50 +101,48 @@ journalctl -u pia-token-renew.service -f
 
 ## Services
 
-- **pia-vpn.service** - Connects to fastest PIA region on boot, detects existing connections to avoid reconnecting
+- **pia-vpn.service** - Connects to fastest PIA region on boot
 - **pia-token-renew.timer** - Renews authentication token every 23 hours (no VPN disconnection)
 - **pia-token-renew.service** - Silent token renewal service
-- **pia-port-forward.service** - Maintains port forwarding by running PIA's `port_forwarding.sh` script with environment variables (`PF_GATEWAY`, `PF_HOSTNAME`, `PIA_TOKEN`) automatically extracted from your VPN connection. 
-  - Deletes old port file on each start to prevent signature mismatches
-  - Requests forwarded ports from PIA and refreshes bindings every 15 minutes
-  - Automatically updates UFW firewall rules via `update-firewall-for-port.sh`
-- **pia-port-forward.service** - Auto-updates firewall rules when port changes
-- **pia-port-monitor.service** (optional) - Health checks for port forwarding, auto-resets if unhealthy
+- **pia-port-forward.service** - Maintains port forwarding:
+  - Deletes old port file on each start (forces fresh assignment)
+  - Requests forwarded ports from PIA via API
+  - Refreshes bindings every 15 minutes (keepalive)
+  - Automatically updates UFW firewall rules
 - **pia-suspend.service** - Handles suspend/resume, gets fresh ports to prevent binding failures
 
 ## How Port Forwarding Works
 
 Port forwarding allows incoming connections on your forwarded port to reach applications like Nicotine+ running behind the VPN. Here's the flow:
 
-1. **Service start**: `pia-port-forward.service` deletes old port file (forces fresh assignment)
-2. **Gets gateway info**: Extracts VPN gateway IP and hostname from `/var/lib/pia/region.txt`
-3. **Requests port**: Contacts PIA's API to request a forwarded port and receives a signature
+1. **Service start**: Deletes old port file (forces fresh assignment)
+2. **Gets gateway info**: Extracts VPN gateway IP and hostname
+3. **Requests port**: Contacts PIA's API for a forwarded port and signature
 4. **Binds port**: Uses the signature to bind the port on PIA's servers
-5. **Updates firewall**: `update-firewall-for-port.sh` adds UFW rule for the new port (removes old ones)
+5. **Updates firewall**: Removes old port rules, adds new port rule (keeps Samba/Nicotine base ports)
 6. **Every 15 minutes**: Refreshes the binding with PIA to keep port active
-7. **Every 30 minutes** (optional): Port monitor checks if port is still reachable
+7. **Stores port**: Writes port number to `/var/lib/pia/forwarded_port`
 
 The forwarded port is automatically added to your UFW firewall rules, making it accessible from the internet.
 
 ## Port Forwarding Details
 
-### Why Fresh Ports on Resume?
+### Fresh Ports on Resume
 
 When you suspend/resume:
 - System disconnects from network
 - Old signature becomes stale
-- On resume, you request new signature from PIA
+- On resume, new signature is requested from PIA
 - **Each signature is bound to a specific port**
-- Old port file + new signature = binding failure
-
-**Solution:** Delete port file on resume, get completely fresh port and signature that match perfectly.
+- Service deletes port file, gets fresh port and signature
+- Port and signature are now in sync ✅
 
 ### Firewall Auto-Updates
 
 The firewall is automatically synchronized with port changes:
 - When service starts: `update-firewall-for-port.sh` runs
 - Old port rules are removed
-- New port rule is added (with Samba/Nicotine base ports)
+- New port rule is added (with Samba/Nicotine base ports: 2240, 2242)
 - Both IPv4 and IPv6 rules are updated
 
 ### Port Expiry
@@ -190,7 +177,7 @@ journalctl -u pia-port-forward.service -f
 sudo systemctl restart pia-vpn.service
 ```
 
-**Check token renewal schedule:**
+**Check token renewal:**
 ```bash
 sudo systemctl list-timers pia-token-renew.timer
 journalctl -u pia-token-renew.service --no-pager | tail -10
@@ -214,11 +201,26 @@ curl -s "https://www.slsknet.org/porttest.php?port=$PORT" | grep "open\|CLOSED"
 
 ## Modified Scripts
 
-The following PIA manual-connections scripts have been modified from the original:
+The PIA manual-connections scripts have been customized for this automated setup:
 
-- `connect_to_wireguard_with_token.sh` - Added Network Manager applet reload on connect
+- `connect_to_wireguard_with_token.sh` - Added Network Manager applet reload
 
 Original scripts: https://github.com/pia-foss/manual-connections
+
+## What's Included
+
+Core scripts:
+- `connect_to_wireguard_with_token.sh` - WireGuard connection
+- `get_region.sh` - Find fastest region
+- `get_token.sh` - Get authentication token
+- `port_forwarding.sh` - Maintain port forwarding with PIA
+
+System scripts:
+- `pia-renew-and-connect-no-pf.sh` - Boot connection with region selection
+- `pia-renew-token-only.sh` - Silent token renewal
+- `update-firewall-for-port.sh` - Auto-update firewall rules
+
+Systemd services and timers for automation.
 
 ## Credits
 
