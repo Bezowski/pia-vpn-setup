@@ -77,7 +77,7 @@ else
   fi
 
   printf 'hostname=%s\ngateway=%s\n' "${HOSTNAME:-}" "${GATEWAY:-}" > "$TMP"
-  chmod 0600 "$TMP"
+  chmod 0644 "$TMP"
   mv -f "$TMP" "$PERSIST_DIR/region.txt"
   
   echo "✅ VPN connected to fastest region"
