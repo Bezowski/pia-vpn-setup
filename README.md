@@ -1,15 +1,36 @@
 # PIA VPN Auto-Setup for Linux
 
-Automated PIA VPN setup with WireGuard, port forwarding, and systemd integration.
+Automated PIA VPN setup with WireGuard, port forwarding, Cinnamon applet, and systemd integration.
 
 ## Features
 
-- ✅ Automatic VPN connection on boot (fastest region)
+- ✅ Automatic VPN connection on boot (fastest region or selected region)
 - ✅ Token renewal every 23 hours (silent, no VPN disconnection)
 - ✅ Automatic port forwarding with firewall updates
 - ✅ Survives suspend/resume seamlessly (fresh ports, zero manual intervention)
 - ✅ Prevents port/signature mismatches
-- ✅ Lightweight (no GUI client needed)
+- ✅ **Cinnamon applet for easy server selection and VPN management**
+- ✅ Lightweight (no official GUI client needed)
+
+## Cinnamon Applet
+
+A native Cinnamon applet provides:
+- 🖱️ **One-click server selection** - Browse and connect to any of 166 PIA servers
+- 📍 **Region display** - Shows currently connected server in tooltip and menu
+- 📊 **Port display** - Shows current forwarded port in real-time
+- 🔄 **Quick toggle** - Connect/disconnect VPN with one click
+- ⚡ **Find Fastest Server** - Auto-selects best performing region
+- ⚙️ **Settings access** - Quick access to credentials file
+
+### Installing the Applet
+
+The applet is installed automatically by the installer to `/usr/share/cinnamon/applets/pia-vpn@bezowski/`
+
+To add it to your Cinnamon panel:
+1. Right-click your panel
+2. Select "Add applets to panel"
+3. Find "PIA VPN" and click to add
+4. The applet will appear in your panel
 
 ## Suspend/Resume Support ✅
 
@@ -34,9 +55,10 @@ curl -s "https://www.slsknet.org/porttest.php?port=$PORT"
 
 ## Requirements
 
-- Ubuntu/Debian-based Linux (tested on Linux Mint)
+- Ubuntu/Debian-based Linux (tested on Linux Mint with Cinnamon)
+- Cinnamon desktop (for applet support)
 - PIA subscription
-- sudo access
+- sudo access with passwordless sudo configured
 - UFW (firewall) - for automatic port rule management
 
 ## Installation
@@ -64,6 +86,8 @@ Add your PIA username and password.
 sudo reboot
 ```
 
+5. Add the applet to your Cinnamon panel (see Cinnamon Applet section above)
+
 ## Configuration
 
 Edit `/etc/pia-credentials` to customize your setup:
@@ -80,6 +104,17 @@ PIA_PF="true"                    # Enable port forwarding (true/false)
 ```
 
 ## Usage
+
+### Using the Applet
+
+The easiest way to manage PIA VPN:
+- Click the applet to see connection status and current port
+- Select Server → Choose any region → Applet reconnects automatically
+- Find Fastest Server → Auto-selects fastest region
+- Connect/Disconnect → Toggle VPN with one click
+- Settings → Edit credentials file
+
+### Command Line
 
 Check VPN status:
 ```bash
@@ -165,6 +200,12 @@ sudo systemctl status pia-port-forward.service
 journalctl -u pia-port-forward.service -f
 ```
 
+**Applet not showing region:**
+The applet reads from `/var/lib/pia/region.txt` which must be readable. The installer sets this up automatically, but if you're having issues:
+```bash
+sudo chmod 644 /var/lib/pia/region.txt
+```
+
 **Port test shows CLOSED:**
 1. Wait 30+ seconds for port assignment
 2. Check service is running: `sudo systemctl status pia-port-forward.service`
@@ -209,20 +250,31 @@ Original scripts: https://github.com/pia-foss/manual-connections
 
 ## What's Included
 
-Core scripts:
+### Cinnamon Applet
+- `applet/applet.js` - Main applet code
+- `applet/metadata.json` - Applet metadata
+- `applet/icons/` - Connected/disconnected icons
+
+### Core Scripts
 - `connect_to_wireguard_with_token.sh` - WireGuard connection
 - `get_region.sh` - Find fastest region
 - `get_token.sh` - Get authentication token
 - `port_forwarding.sh` - Maintain port forwarding with PIA
 
-System scripts:
+### System Scripts
 - `pia-renew-and-connect-no-pf.sh` - Boot connection with region selection
 - `pia-renew-token-only.sh` - Silent token renewal
 - `update-firewall-for-port.sh` - Auto-update firewall rules
 
-Systemd services and timers for automation.
+### Systemd Services and Timers
+- `pia-vpn.service` - Main VPN connection service
+- `pia-token-renew.service` - Token renewal service
+- `pia-token-renew.timer` - Token renewal scheduler
+- `pia-port-forward.service` - Port forwarding service
+- `pia-suspend.service` - Suspend/resume handler
 
 ## Credits
 
 Setup created with assistance from Claude (Anthropic).
 PIA manual-connections scripts: https://github.com/pia-foss/manual-connections
+Cinnamon applet developed for easy VPN and server management.

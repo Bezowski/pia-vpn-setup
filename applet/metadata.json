@@ -1,0 +1,12 @@
+{
+  "uuid": "pia-vpn@bezowski",
+  "name": "PIA VPN Control",
+  "description": "Monitor and control PIA VPN connection with port forwarding status",
+  "icon": "network-vpn",
+  "version": "1.0.0",
+  "author": "Bezowski",
+  "url": "https://github.com/Bezowski/pia-vpn-setup",
+  "category": "network",
+  "prevent-unload": false,
+  "max-instances": 1
+}
