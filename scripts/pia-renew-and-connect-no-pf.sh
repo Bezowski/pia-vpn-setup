@@ -20,13 +20,13 @@ fi
 
 : "${PIA_USER:?PIA_USER must be set}"
 : "${PIA_PASS:?PIA_PASS must be set}"
-: "${PREFERRED_REGION:=aus}"
-: "${PIA_PF:=false}"
-: "${AUTOCONNECT:=false}"
+: "${PREFERRED_REGION:=none}"
+: "${PIA_PF:=true}"
+: "${AUTOCONNECT:=true}"
 : "${VPN_PROTOCOL:=wireguard}"
 : "${DISABLE_IPV6:=yes}"
 : "${PIA_DNS:=true}"
-: "${MAX_LATENCY:=1}"
+: #"${MAX_LATENCY:=1}"
 
 cd "$MANUAL_CONN_DIR"
 

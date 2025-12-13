@@ -97,7 +97,6 @@ PIA_USER="p1234567"              # Your PIA username
 PIA_PASS="your_password"         # Your PIA password
 PREFERRED_REGION=none            # Set to region code or 'none' for auto-select
 AUTOCONNECT=true                 # Auto-select fastest region (true/false)
-MAX_LATENCY=0.2                  # Max latency in seconds for region testing
 DISABLE_IPV6="yes"               # Disable IPv6 leaks (yes/no)
 PIA_DNS="true"                   # Use PIA DNS (true/false)
 PIA_PF="true"                    # Enable port forwarding (true/false)
