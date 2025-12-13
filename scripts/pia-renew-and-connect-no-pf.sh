@@ -60,8 +60,8 @@ save_current_region() {
 # Check if we already have a working VPN connection
 if ip link show pia &>/dev/null && ip addr show pia | grep -q "inet "; then
   
-  # VPN is connected - check if region changed
-  if region_changed; then
+  # VPN is connected - check if region changed OR if AUTOCONNECT is enabled
+  if region_changed || [ "$AUTOCONNECT" = "true" ]; then
     echo "Region preference changed from $(cat "$REGION_CACHE" 2>/dev/null || echo "auto") to $PREFERRED_REGION"
     echo "Reconnecting to new region..."
     disconnect_vpn
@@ -81,8 +81,12 @@ fi
 # If we get here, we need to connect (either first run or region changed)
 echo "No VPN connection found, testing regions to find the fastest..."
 
-# Use the configured preferences for reconnect
-# (Don't override PREFERRED_REGION and AUTOCONNECT - keep user's settings)
+# If AUTOCONNECT is enabled, force auto-select (ignore PREFERRED_REGION)
+if [ "$AUTOCONNECT" = "true" ]; then
+  echo "AUTOCONNECT is enabled, will connect to fastest region..."
+  PREFERRED_REGION=none
+fi
+export PREFERRED_REGION
 export PREFERRED_REGION AUTOCONNECT
 
 # Get region details and connect
