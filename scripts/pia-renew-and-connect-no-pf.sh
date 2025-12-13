@@ -121,6 +121,7 @@ fi
 printf 'hostname=%s\ngateway=%s\n' "${HOSTNAME:-}" "${GATEWAY:-}" > "$TMP"
 chmod 0600 "$TMP"
 mv -f "$TMP" "$PERSIST_DIR/region.txt"
+chmod 644 "$PERSIST_DIR/region.txt"
 
 # Save the region we just connected to
 save_current_region
