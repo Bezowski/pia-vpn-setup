@@ -23,6 +23,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         this.current_port = null;
         this.current_region_name = null;
         this.servers_data = null;
+        this._last_toggle_text = null;
         
         this.set_applet_icon_path(this.metadata.path + "/icons/disconnected.png");
         this.set_applet_tooltip("PIA VPN");
@@ -66,14 +67,19 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         }
         // Check status every 10 seconds
         this._status_timeout = Mainloop.timeout_add_seconds(10, Lang.bind(this, () => {
-            this.update_status();
+            // Only update if menu is closed
+            if (!this._menu.isOpen) {
+                this.update_status();
+            }
             return true;
         }));
     }
     
     on_applet_clicked() {
         if (this._menu) {
-            this.update_status();
+            if (!this._menu.isOpen) {
+                this.update_status();
+            }
             this._menu.toggle();
         }
     }
@@ -92,7 +98,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         
-        this.toggle_item = new PopupMenu.PopupMenuItem("Connect");
+        this.toggle_item = new PopupMenu.PopupMenuItem("Disconnect");
         this.toggle_item.connect('activate', Lang.bind(this, this.on_toggle_vpn));
         this._menu.addMenuItem(this.toggle_item);
         
@@ -286,7 +292,11 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         }
         
         if (this.toggle_item) {
-            this.toggle_item.label.set_text(this.is_connected ? "Disconnect" : "Connect");
+            let new_text = this.is_connected ? "Disconnect" : "Connect";
+            if (new_text !== this._last_toggle_text) {
+                this.toggle_item.label.set_text(new_text);
+                this._last_toggle_text = new_text;
+            }
         }
         
         if (this.port_item) {
@@ -367,6 +377,8 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                             
                             Mainloop.timeout_add_seconds(5, Lang.bind(this, () => {
                                 this.update_status();
+                                // Rebuild menu to reset width constraints
+                                this._buildMenu();
                                 return false;
                             }));
                             return false;
