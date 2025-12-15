@@ -36,6 +36,10 @@ fi
 # Export for port_forwarding.sh (it will read PIA_TOKEN from /var/lib/pia/token.txt itself)
 export PF_HOSTNAME PF_GATEWAY
 
+# Delete old port file to force fresh assignment
+# This ensures we get a new port when the service restarts
+rm -f "$PERSIST_DIR/forwarded_port"
+
 # The script will read token from $PERSIST_DIR/token.txt automatically
 cd /usr/local/bin/manual-connections
 exec ./port_forwarding.sh
