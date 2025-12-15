@@ -67,10 +67,17 @@ if ip link show pia &>/dev/null && ip addr show pia | grep -q "inet "; then
     disconnect_vpn
     # Fall through to reconnect with new region
   else
-    # Same region, just renew token
+# Same region, just renew token
     echo "VPN already connected to $PREFERRED_REGION, just renewing token..."
     ./get_token.sh > /dev/null 2>&1
     echo "✅ Token renewed"
+    # Restart port forwarding to ensure fresh port (use start with force to avoid blocking)
+    systemctl kill pia-port-forward.service 2>/dev/null || true
+    sleep 1
+    systemctl start pia-port-forward.service &
+
+    # Update region.txt timestamp to trigger port-forward restart
+    touch /var/lib/pia/region.txt
     echo "Port forwarding is managed by pia-port-forward.service (PIA_PF=$PIA_PF)"
     echo "📅 Token renewal: Every 23 hours (no VPN disconnection)"
     systemctl list-timers pia-token-renew.timer --no-pager | grep pia-token-renew || true
@@ -125,6 +132,13 @@ chmod 644 "$PERSIST_DIR/region.txt"
 
 # Save the region we just connected to
 save_current_region
+
+# Restart port forwarding for new region (use start with force to avoid blocking)
+systemctl kill pia-port-forward.service 2>/dev/null || true
+sleep 1
+systemctl start pia-port-forward.service &
+
+echo "✅ VPN connected to fastest region"
 
 echo "✅ VPN connected to fastest region"
 echo "Port forwarding is managed by pia-port-forward.service (PIA_PF=$PIA_PF)"
