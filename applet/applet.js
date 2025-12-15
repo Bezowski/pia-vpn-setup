@@ -107,6 +107,11 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         this.servers_menu_item = new PopupMenu.PopupSubMenuMenuItem("Select Server");
         this._menu.addMenuItem(this.servers_menu_item);
         
+        // Repopulate servers if data is available
+        if (this.servers_data) {
+            this.populate_servers_menu();
+        }
+        
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         
         let refreshItem = new PopupMenu.PopupMenuItem("Find Fastest Server");
@@ -194,6 +199,8 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                                     
                                     Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
                                         this.update_status();
+                                        // Rebuild menu to reset width constraints
+                                        this._buildMenu();
                                         return false;
                                     }));
                                 }
@@ -328,23 +335,9 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     on_toggle_vpn() {
         try {
             if (this.is_connected) {
-                try {
-                    let port_file = Gio.file_new_for_path("/var/lib/pia/forwarded_port");
-                    if (port_file.query_exists(null)) {
-                        port_file.delete(null);
-                    }
-                } catch(e) {
-                    // Ignore delete errors
-                }
                 Gio.Subprocess.new(['sudo', 'wg-quick', 'down', 'pia'], Gio.SubprocessFlags.NONE);
             } else {
                 Gio.Subprocess.new(['sudo', 'wg-quick', 'up', 'pia'], Gio.SubprocessFlags.NONE);
-                
-                Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
-                    Gio.Subprocess.new(['sudo', 'systemctl', 'restart', 'pia-port-forward.service'], 
-                        Gio.SubprocessFlags.NONE);
-                    return false;
-                }));
             }
             
             Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
