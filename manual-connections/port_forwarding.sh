@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Patched port_forwarding.sh
+# Patched port_forwarding.sh with graceful handling for non-PF servers
 set -euo pipefail
 
 # Simple tool checks
@@ -96,13 +96,19 @@ fi
 if [ -z "${PAYLOAD_AND_SIGNATURE:-}" ]; then
   echo
   echo -n "Getting new signature... "
+  
+  # Try to get signature, but handle non-PF servers gracefully
   if ! payload_and_signature="$(retry 5 2 /usr/bin/curl -s -m 5 \
     --connect-to "${PF_HOSTNAME}::${PF_GATEWAY}:" \
     --cacert "ca.rsa.4096.crt" \
     -G --data-urlencode "token=${PIA_TOKEN}" \
     "https://${PF_HOSTNAME}:19999/getSignature")"; then
+    
+    # Connection failed - likely non-PF server
     >&2 echo -e "${red}Failed to get signature after retries.${nc}"
-    exit 1
+    >&2 echo "This server may not support port forwarding."
+    >&2 echo "Port forwarding is disabled on US servers and some other regions."
+    exit 0  # Exit cleanly (0) instead of failing (1) so service doesn't restart
   fi
 else
   payload_and_signature=$PAYLOAD_AND_SIGNATURE
@@ -112,7 +118,15 @@ export payload_and_signature
 
 if [ "$(/usr/bin/jq -r '.status' <<<"$payload_and_signature")" != "OK" ]; then
   >&2 echo -e "${red}The payload_and_signature variable does not contain an OK status.${nc}"
-  exit 1
+  
+  # Check if this is a non-PF server error
+  ERROR_MSG=$(/usr/bin/jq -r '.message // empty' <<<"$payload_and_signature")
+  if [ -n "$ERROR_MSG" ]; then
+    >&2 echo "Error: $ERROR_MSG"
+  fi
+  
+  >&2 echo "This server may not support port forwarding."
+  exit 0  # Exit cleanly (0) so service doesn't restart endlessly
 fi
 echo -e "${green}OK!${nc}"
 
@@ -156,6 +170,9 @@ if [ -n "${expires_at:-}" ]; then
   printf '%s %s\n' "$port" "$EXPIRY_UNIX" > "$tmp"
   /bin/chmod 0644 "$tmp"
   /bin/mv -f "$tmp" "$PORT_FILE"
+
+  # Update firewall immediately after getting new port
+  /usr/local/bin/pia-firewall-update-wrapper.sh || true
 fi
 
 # Bind and keepalive loop
@@ -188,4 +205,3 @@ while true; do
   # sleep 15 minutes
   sleep 900
 done
-

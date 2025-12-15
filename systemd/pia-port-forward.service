@@ -2,7 +2,7 @@
 Description=PIA port forwarding manager
 After=network-online.target pia-vpn.service
 Wants=network-online.target
-BindsTo=pia-vpn.service
+Requires=pia-vpn.service
 
 [Service]
 Type=simple
@@ -18,8 +18,9 @@ ExecStartPre=/bin/bash -c 'timeout 120 bash -c '"'"'while ! ([ -f /var/lib/pia/r
 # Run the port forwarding wrapper (handles PIA_PF check internally)
 ExecStart=/usr/local/bin/pia-port-forward-wrapper.sh
 
-# Update firewall rules with the new port
-ExecStartPost=/bin/bash -c 'sleep 3 && /usr/local/bin/update-firewall-for-port.sh'
+# Update firewall when port changes (runs in background)
+# This runs after ExecStart succeeds and monitors for port file changes
+ExecStartPost=/bin/bash -c 'sleep 1 && /usr/local/bin/pia-firewall-update-wrapper.sh'
 
 # Restart policy
 Restart=on-failure
