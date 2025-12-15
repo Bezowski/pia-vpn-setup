@@ -8,15 +8,25 @@ BindsTo=pia-vpn.service
 Type=simple
 RemainAfterExit=no
 WorkingDirectory=/usr/local/bin/manual-connections
+
 # Read the region file to get gateway and hostname
 EnvironmentFile=-/var/lib/pia/region.txt
-# Wait for region.txt to be ready, then delete old port file
-ExecStartPre=/bin/bash -c 'timeout 120 bash -c "while ! ([ -f /var/lib/pia/region.txt ] && grep -q \"^gateway=\" /var/lib/pia/region.txt && ip link show pia >/dev/null 2>&1 && ip addr show pia | grep -q \"inet \"); do sleep 1; done"; rm -f /var/lib/pia/forwarded_port'
-ExecStart=/bin/bash -c 'export PIA_TOKEN=$(head -1 /var/lib/pia/token.txt); export PF_GATEWAY=$(grep "^gateway=" /var/lib/pia/region.txt | cut -d= -f2); export PF_HOSTNAME=$(grep "^hostname=" /var/lib/pia/region.txt | cut -d= -f2); /usr/local/bin/manual-connections/port_forwarding.sh'
+
+# Wait for VPN to be ready
+ExecStartPre=/bin/bash -c 'timeout 120 bash -c '"'"'while ! ([ -f /var/lib/pia/region.txt ] && grep -q "^gateway=" /var/lib/pia/region.txt && ip link show pia >/dev/null 2>&1 && ip addr show pia | grep -q "inet "); do sleep 1; done'"'"''
+
+# Run the port forwarding wrapper (handles PIA_PF check internally)
+ExecStart=/usr/local/bin/pia-port-forward-wrapper.sh
+
+# Update firewall rules with the new port
 ExecStartPost=/bin/bash -c 'sleep 3 && /usr/local/bin/update-firewall-for-port.sh'
-Restart=always
+
+# Restart policy
+Restart=on-failure
 RestartSec=15
-StartLimitInterval=0
+StartLimitInterval=300
+StartLimitBurst=3
+
 User=root
 StandardOutput=journal
 StandardError=journal
