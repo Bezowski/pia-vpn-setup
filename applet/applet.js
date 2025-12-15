@@ -17,7 +17,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         this.orientation = orientation;
         this._menu_manager = null;
         this._menu = null;
-        this._status_timeout = null;
+        this._inotify_process = null;
         
         this.is_connected = false;
         this.current_port = null;
@@ -39,45 +39,90 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         this._buildMenu();
         this.fetch_servers_data();
         
-        // Initial status check after servers data loads
-        Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
+        // Initial status check
+        Mainloop.timeout_add_seconds(1, Lang.bind(this, () => {
             this.update_status();
             return false;
         }));
         
-        // Check status periodically when menu is open, otherwise check every 10 seconds
-        this._setupStatusCheck();
+        // Start inotify monitoring for file changes
+        this._setupInotifyMonitoring();
     }
     
     on_applet_removed_from_panel() {
+        this._stopInotifyMonitoring();
+        
         if (this._menu_manager) {
             this._menu_manager.removeMenu(this._menu);
             this._menu = null;
             this._menu_manager = null;
         }
-        if (this._status_timeout) {
-            Mainloop.source_remove(this._status_timeout);
-            this._status_timeout = null;
+    }
+    
+    _setupInotifyMonitoring() {
+        try {
+            // Monitor /var/lib/pia/ for changes to forwarded_port and region.txt
+            let proc = new Gio.Subprocess({
+                argv: ['inotifywait', '-m', '-e', 'modify,create', '/var/lib/pia/'],
+                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
+            });
+            
+            proc.init(null);
+            this._inotify_process = proc;
+            
+            // Read output asynchronously
+            let stdout = proc.get_stdout_pipe();
+            let stream = new Gio.DataInputStream({ base_stream: stdout });
+            
+            this._readInotifyLine(stream, proc);
+            
+        } catch(e) {
+            // Fallback: if inotify fails, do nothing - polling is disabled
+            // but manual updates on menu open will still work
+            this.log("inotify setup failed: " + e);
         }
     }
     
-    _setupStatusCheck() {
-        if (this._status_timeout) {
-            Mainloop.source_remove(this._status_timeout);
-        }
-        // Check status every 10 seconds
-        this._status_timeout = Mainloop.timeout_add_seconds(10, Lang.bind(this, () => {
-            // Only update if menu is closed
-            if (!this._menu.isOpen) {
-                this.update_status();
+    _readInotifyLine(stream, proc) {
+        stream.read_line_async(GLib.PRIORITY_DEFAULT, null, Lang.bind(this, (stream, result) => {
+            try {
+                let [line, length] = stream.read_line_finish(result);
+                
+                if (line !== null) {
+                    // Any change to /var/lib/pia/ triggers an update
+                    Mainloop.idle_add(Lang.bind(this, () => {
+                        this.update_status();
+                        return false;
+                    }));
+                    
+                    // Continue reading
+                    this._readInotifyLine(stream, proc);
+                } else {
+                    // Stream ended
+                    this._inotify_process = null;
+                }
+            } catch(e) {
+                this.log("inotify read error: " + e);
+                this._inotify_process = null;
             }
-            return true;
         }));
+    }
+    
+    _stopInotifyMonitoring() {
+        if (this._inotify_process) {
+            try {
+                this._inotify_process.force_exit();
+            } catch(e) {
+                // Already terminated
+            }
+            this._inotify_process = null;
+        }
     }
     
     on_applet_clicked() {
         if (this._menu) {
             if (!this._menu.isOpen) {
+                // Update status when menu opens (in case inotify missed something)
                 this.update_status();
             }
             this._menu.toggle();
@@ -107,7 +152,6 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         this.servers_menu_item = new PopupMenu.PopupSubMenuMenuItem("Select Server");
         this._menu.addMenuItem(this.servers_menu_item);
         
-        // Repopulate servers if data is available
         if (this.servers_data) {
             this.populate_servers_menu();
         }
@@ -138,7 +182,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 this.populate_servers_menu();
             }
         } catch(e) {
-            // Silently fail - servers menu just won't populate
+            // Silently fail
         }
     }
     
@@ -199,7 +243,6 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                                     
                                     Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
                                         this.update_status();
-                                        // Rebuild menu to reset width constraints
                                         this._buildMenu();
                                         return false;
                                     }));
@@ -370,7 +413,6 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                             
                             Mainloop.timeout_add_seconds(5, Lang.bind(this, () => {
                                 this.update_status();
-                                // Rebuild menu to reset width constraints
                                 this._buildMenu();
                                 return false;
                             }));
