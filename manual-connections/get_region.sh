@@ -91,8 +91,8 @@ touch /opt/piavpn-manual/latencyList
 # This allows you to set the maximum allowed latency in seconds.
 # All servers that respond slower than this will be ignored.
 # You can inject this with the environment variable MAX_LATENCY.
-# The default value is 50 milliseconds.
-MAX_LATENCY=${MAX_LATENCY:-0.05}
+# The default value is 100 milliseconds.
+MAX_LATENCY=${MAX_LATENCY:-0.1}
 export MAX_LATENCY
 
 serverlist_url='https://serverlist.piaservers.net/vpninfo/servers/v6'
