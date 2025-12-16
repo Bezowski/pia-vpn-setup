@@ -31,10 +31,14 @@ cp scripts/pia-renew-and-connect-no-pf.sh /usr/local/bin/
 cp scripts/pia-renew-token-only.sh /usr/local/bin/
 cp scripts/pia-suspend-handler.sh /usr/local/bin/
 cp scripts/update-firewall-for-port.sh /usr/local/bin/
+cp scripts/pia-port-forward-wrapper.sh /usr/local/bin/
+cp scripts/pia-firewall-update-wrapper.sh /usr/local/bin/
 chmod +x /usr/local/bin/pia-renew-and-connect-no-pf.sh
 chmod +x /usr/local/bin/pia-renew-token-only.sh
 chmod +x /usr/local/bin/pia-suspend-handler.sh
 chmod +x /usr/local/bin/update-firewall-for-port.sh
+chmod +x /usr/local/bin/pia-port-forward-wrapper.sh
+chmod +x /usr/local/bin/pia-firewall-update-wrapper.sh
 
 # Copy PIA manual connections scripts (with our modifications)
 echo "Installing PIA manual-connections scripts..."
