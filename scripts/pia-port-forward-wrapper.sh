@@ -33,8 +33,15 @@ if [ -z "$PF_HOSTNAME" ] || [ -z "$PF_GATEWAY" ]; then
     exit 1
 fi
 
-# Export for port_forwarding.sh (it will read PIA_TOKEN from /var/lib/pia/token.txt itself)
-export PF_HOSTNAME PF_GATEWAY
+# Read and export token
+PIA_TOKEN=$(head -1 /var/lib/pia/token.txt 2>/dev/null || echo "")
+if [ -z "$PIA_TOKEN" ]; then
+    echo "Error: No token found in /var/lib/pia/token.txt" >&2
+    exit 1
+fi
+
+# Export for port_forwarding.sh
+export PF_HOSTNAME PF_GATEWAY PIA_TOKEN
 
 # Delete old port file to force fresh assignment
 # This ensures we get a new port when the service restarts
