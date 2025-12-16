@@ -92,13 +92,13 @@ Add your PIA username and password.
 sudo reboot
 ```
 
+5. Add the applet to your Cinnamon panel (see Cinnamon Applet section above)
+
 ## Uninstall
 
 ```bash
 sudo ./uninstall.sh
 ```
-
-5. Add the applet to your Cinnamon panel (see Cinnamon Applet section above)
 
 ## Configuration
 
