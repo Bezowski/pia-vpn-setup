@@ -20,7 +20,10 @@ fi
 # Install dependencies
 echo "Installing dependencies..."
 apt update
-apt install -y wireguard-tools curl jq openresolv inotify-tools
+apt install -y wireguard-tools curl jq inotify-tools
+
+# Try to install openresolv if available (optional for some distros)
+apt install -y openresolv 2>/dev/null || echo "⚠️  openresolv not available (optional)"
 
 # Copy scripts
 echo "Installing scripts..."
