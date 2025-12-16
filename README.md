@@ -2,6 +2,12 @@
 
 Automated PIA VPN setup with WireGuard, port forwarding, Cinnamon applet, and systemd integration.
 
+I was having problems with the official PIA VPN app for Linux so I built a new one. 
+
+This has only been tested on Linux Mint 22.2, but should work on other Debian/Ubuntu based distros. 
+
+The applet is for the Cinnamon desktop environment only.
+
 ## Features
 
 - ✅ Automatic VPN connection on boot (fastest region or selected region)
@@ -243,7 +249,9 @@ curl -s "https://www.slsknet.org/porttest.php?port=$PORT" | grep "open\|CLOSED"
 
 The PIA manual-connections scripts have been customized for this automated setup:
 
-- `connect_to_wireguard_with_token.sh` - Added Network Manager applet reload
+- `connect_to_wireguard_with_token.sh` - Added Network Manager applet reload, removed inline port forwarding, delegated to pia-port-forward.service
+- `get_region.sh` - Changed region check latency to a slower speed (100 milliseconds) to avoid timeouts.
+- `port_forwarding.sh` - Updated permissions for forwarded_port file (644 instead of 600), call firewall wrapper directly from port_forwarding.sh after port assignment
 
 Original scripts: https://github.com/pia-foss/manual-connections
 
@@ -264,6 +272,9 @@ Original scripts: https://github.com/pia-foss/manual-connections
 - `pia-renew-and-connect-no-pf.sh` - Boot connection with region selection
 - `pia-renew-token-only.sh` - Silent token renewal
 - `update-firewall-for-port.sh` - Auto-update firewall rules
+- `pia-firewall-update-wrapper.sh` - Used for conditional firewall updates
+- `pia-suspend-handler.sh` - Handles suspend/resume to maintain port forwarding
+- `pia-port-forward-wrapper.sh` - Ensures port forwarding only runs if enabled, always gets a fresh port, handles the PIA_PF setting cleanly
 
 ### Systemd Services and Timers
 - `pia-vpn.service` - Main VPN connection service
