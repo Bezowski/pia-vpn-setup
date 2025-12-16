@@ -70,6 +70,13 @@ if ip link show pia &>/dev/null && ip addr show pia | grep -q "inet "; then
 # Same region, just renew token
     echo "VPN already connected to $PREFERRED_REGION, just renewing token..."
     ./get_token.sh > /dev/null 2>&1
+    
+    # Copy token to persistent location for port-forward
+    if [ -f /opt/piavpn-manual/token ]; then
+      mkdir -p "$PERSIST_DIR"
+      head -1 /opt/piavpn-manual/token > "$PERSIST_DIR/token.txt"
+      chmod 644 "$PERSIST_DIR/token.txt"
+    fi
     echo "✅ Token renewed"
     # Restart port forwarding to ensure fresh port (use start with force to avoid blocking)
     systemctl kill pia-port-forward.service 2>/dev/null || true
