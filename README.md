@@ -28,7 +28,7 @@ A native Cinnamon applet provides:
 - ⚡ **Find Fastest Server** - Auto-selects best performing region
 - ⚙️ **Settings access** - Quick access to credentials file
 
-<img src="https://raw.githubusercontent.com/Bezowski/pia-vpn-setup/main/screenshots/PIA-Cinnamon-applet1.png" width="222" />
+<img src="https://raw.githubusercontent.com/Bezowski/pia-vpn-setup/main/screenshots/PIA-Cinnamon-applet1.png" width="222" height="336" />
 
 ### Installing the Applet
 
