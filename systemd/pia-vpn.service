@@ -5,15 +5,16 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-#Comment out RemainAfterExit=yes to have this service run on resume from suspend
+# KEEP RemainAfterExit=yes so port-forward service stays active
 RemainAfterExit=yes
 WorkingDirectory=/usr/local/bin/manual-connections
 TimeoutStartSec=5min
 ExecStartPre=/bin/sleep 2
 ExecStart=/bin/bash /usr/local/bin/pia-renew-and-connect-no-pf.sh
 Restart=on-failure
+RestartSec=10
+
 User=root
 
 [Install]
 WantedBy=multi-user.target
-

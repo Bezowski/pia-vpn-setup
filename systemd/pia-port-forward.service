@@ -9,8 +9,8 @@ RemainAfterExit=no
 WorkingDirectory=/usr/local/bin/manual-connections
 EnvironmentFile=-/var/lib/pia/region.txt
 
-# Wait for VPN to be ready
-ExecStartPre=/bin/bash -c 'timeout 180 bash -c '"'"'while ! ([ -f /var/lib/pia/region.txt ] && grep -q "^gateway=" /var/lib/pia/region.txt && ip link show pia >/dev/null 2>&1 && ip addr show pia | grep -q "inet "); do sleep 1; done'"'"''
+# Wait for VPN to be ready - increased timeout to 5 minutes
+ExecStartPre=/bin/bash -c 'timeout 300 bash -c '"'"'while ! ([ -f /var/lib/pia/region.txt ] && grep -q "^gateway=" /var/lib/pia/region.txt && ip link show pia >/dev/null 2>&1 && ip addr show pia | grep -q "inet "); do sleep 1; done'"'"''
 
 # Run port forwarding
 ExecStart=/usr/local/bin/pia-port-forward-wrapper.sh
@@ -18,7 +18,7 @@ ExecStart=/usr/local/bin/pia-port-forward-wrapper.sh
 # Update firewall
 ExecStartPost=/bin/bash -c 'sleep 1 && /usr/local/bin/pia-firewall-update-wrapper.sh'
 
-# Simple restart policy
+# Restart policy - simple restart on failure
 Restart=on-failure
 RestartSec=10
 
