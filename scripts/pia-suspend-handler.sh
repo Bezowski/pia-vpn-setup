@@ -2,6 +2,49 @@
 # Handle PIA VPN on suspend/resume
 # Smart strategy: Validate connection after resume, only reconnect if broken
 
+# Define reconnect function FIRST (before it's used)
+reconnect_vpn() {
+  echo "$(date): Stopping VPN interface..."
+  wg-quick down pia 2>/dev/null || true
+  sleep 2
+  
+  echo "$(date): Restarting pia-vpn service..."
+  systemctl restart pia-vpn.service
+  
+  echo "$(date): Waiting for new VPN connection..."
+  for i in {1..30}; do
+    if ip addr show pia | grep -q "inet "; then
+      echo "$(date): ✓ VPN reconnected"
+      
+      # Delete old port file to force fresh assignment
+      rm -f /var/lib/pia/forwarded_port
+      
+      # Start port forwarding with fresh port
+      echo "$(date): Starting port forwarding with fresh port..."
+      systemctl start pia-port-forward.service 2>/dev/null || true
+      
+      # Wait for new port to be assigned
+      for j in {1..15}; do
+        if [ -f /var/lib/pia/forwarded_port ]; then
+          NEW_PORT=$(awk '{print $1}' /var/lib/pia/forwarded_port)
+          echo "$(date): ✅ Got fresh forwarded port: $NEW_PORT"
+          break
+        fi
+        sleep 1
+      done
+      
+      echo "$(date): ✅ VPN and port forwarding restored"
+      return 0
+    fi
+    sleep 1
+  done
+  
+  echo "$(date): ✗ Failed to reconnect VPN after resume"
+  echo "$(date): Manual reconnection needed: sudo systemctl restart pia-vpn.service"
+  return 1
+}
+
+# Main logic
 case "$1" in
   pre)
     echo "$(date): Preparing for suspend - stopping port forwarding"
@@ -55,44 +98,3 @@ case "$1" in
     exit 1
     ;;
 esac
-
-reconnect_vpn() {
-  echo "$(date): Stopping VPN interface..."
-  wg-quick down pia 2>/dev/null || true
-  sleep 2
-  
-  echo "$(date): Restarting pia-vpn service..."
-  systemctl restart pia-vpn.service
-  
-  echo "$(date): Waiting for new VPN connection..."
-  for i in {1..30}; do
-    if ip addr show pia | grep -q "inet "; then
-      echo "$(date): ✓ VPN reconnected"
-      
-      # Delete old port file to force fresh assignment
-      rm -f /var/lib/pia/forwarded_port
-      
-      # Start port forwarding with fresh port
-      echo "$(date): Starting port forwarding with fresh port..."
-      systemctl start pia-port-forward.service 2>/dev/null || true
-      
-      # Wait for new port to be assigned
-      for j in {1..15}; do
-        if [ -f /var/lib/pia/forwarded_port ]; then
-          NEW_PORT=$(awk '{print $1}' /var/lib/pia/forwarded_port)
-          echo "$(date): ✅ Got fresh forwarded port: $NEW_PORT"
-          break
-        fi
-        sleep 1
-      done
-      
-      echo "$(date): ✅ VPN and port forwarding restored"
-      return 0
-    fi
-    sleep 1
-  done
-  
-  echo "$(date): ✗ Failed to reconnect VPN after resume"
-  echo "$(date): Manual reconnection needed: sudo systemctl restart pia-vpn.service"
-  return 1
-}
