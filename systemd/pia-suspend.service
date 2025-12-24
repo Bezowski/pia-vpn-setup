@@ -6,6 +6,9 @@ StopWhenUnneeded=yes
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# Increase timeout - reconnecting can take time
+TimeoutStartSec=60
+TimeoutStopSec=60
 ExecStart=/bin/bash /usr/local/bin/pia-suspend-handler.sh pre
 ExecStop=/bin/bash /usr/local/bin/pia-suspend-handler.sh post
 User=root
