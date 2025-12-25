@@ -161,16 +161,23 @@ fi
 
 # Persist port + expiry atomically (convert expiry to unix epoch)
 if [ -n "${expires_at:-}" ]; then
-  if EXPIRY_UNIX=$(/bin/date -d "$expires_at" +%s 2>/dev/null); then
+  # Strip nanoseconds from ISO8601 format if present
+  # Input: "2026-02-25T18:02:41.37845301Z"
+  # Output: "2026-02-25T18:02:41Z"
+  expires_at_clean="${expires_at%.*}Z"
+  
+  if EXPIRY_UNIX=$(/bin/date -d "$expires_at_clean" +%s 2>/dev/null); then
     :
   else
-    EXPIRY_UNIX=0
+    # Fallback: port expires in ~60 days (2 months)
+    EXPIRY_UNIX=$(($(date +%s) + 5184000))
   fi
+  
   tmp="$(/bin/mktemp "${PERSIST_DIR}/forwarded_port.XXXX")"
   printf '%s %s\n' "$port" "$EXPIRY_UNIX" > "$tmp"
   /bin/chmod 0644 "$tmp"
   /bin/mv -f "$tmp" "$PORT_FILE"
-
+  
   # Update firewall immediately after getting new port
   /usr/local/bin/pia-firewall-update-wrapper.sh || true
 fi
