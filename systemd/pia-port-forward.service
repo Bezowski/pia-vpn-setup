@@ -2,8 +2,6 @@
 Description=PIA port forwarding manager
 After=network-online.target pia-vpn.service
 Wants=network-online.target
-Requires=pia-vpn.service
-ConditionPathExists=/var/lib/pia/region.txt
 
 [Service]
 Type=simple
@@ -11,18 +9,19 @@ RemainAfterExit=no
 WorkingDirectory=/usr/local/bin/manual-connections
 EnvironmentFile=-/var/lib/pia/region.txt
 
-# Wait for VPN to be ready - region.txt must exist with gateway info
-# Timeout: 5 minutes to match VPN connection timeout
-ExecStartPre=/bin/bash -c 'for i in {1..300}; do [ -s /var/lib/pia/region.txt ] && grep -q "^gateway=" /var/lib/pia/region.txt && break; sleep 1; done; [ -s /var/lib/pia/region.txt ] || (echo "Error: region.txt not found or incomplete" >&2; exit 1)'
+# Wait for region.txt with gateway info, but don't block boot
+# If region.txt doesn't exist after 60 seconds, the service will still start
+# but pia-port-forward-wrapper.sh will handle the missing region.txt gracefully
+ExecStartPre=/bin/bash -c 'timeout 60 bash -c '"'"'while ! ([ -f /var/lib/pia/region.txt ] && grep -q "^gateway=" /var/lib/pia/region.txt); do sleep 1; done'"'"' || true'
 
-# Run port forwarding
+# Run port forwarding wrapper which handles missing region.txt gracefully
 ExecStart=/usr/local/bin/pia-port-forward-wrapper.sh
 
-# Wait for port file to be created before updating firewall
-# This prevents race conditions where firewall updates before port file exists
-ExecStartPost=/bin/bash -c 'for i in {1..30}; do [ -f /var/lib/pia/forwarded_port ] && break; sleep 1; done; /usr/local/bin/pia-firewall-update-wrapper.sh'
+# Update firewall after port file is created
+# Wait up to 30 seconds for port file to appear
+ExecStartPost=/bin/bash -c 'for i in {1..30}; do [ -f /var/lib/pia/forwarded_port ] && /usr/local/bin/pia-firewall-update-wrapper.sh && break; sleep 1; done || true'
 
-# Restart policy
+# Restart on failure - this ensures port forwarding restarts if it fails initially
 Restart=on-failure
 RestartSec=10
 
