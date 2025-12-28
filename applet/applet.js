@@ -307,6 +307,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                     if (match && this.servers_data && this.servers_data.regions) {
                         let hostname = match[1];
                         
+                        // First, try exact match on 'cn' field
                         for (let i = 0; i < this.servers_data.regions.length; i++) {
                             let region = this.servers_data.regions[i];
                             for (let protocol in region.servers) {
@@ -319,6 +320,30 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                                         }
                                     }
                                 }
+                            }
+                        }
+                        
+                        // Fallback: try matching hostname prefix (e.g., "sydney" in "sydney.privateinternetaccess.com")
+                        let prefix = hostname.split('.')[0].toLowerCase();
+                        for (let i = 0; i < this.servers_data.regions.length; i++) {
+                            let region = this.servers_data.regions[i];
+                            let region_name_lower = region.name.toLowerCase();
+                            
+                            // Check if region name contains the prefix (handles "AU Sydney" -> contains "sydney")
+                            if (region_name_lower.includes(prefix)) {
+                                this.current_region_name = region.name;
+                                return;
+                            }
+                        }
+                        
+                        // Last resort: try matching against region ID if available
+                        for (let i = 0; i < this.servers_data.regions.length; i++) {
+                            let region = this.servers_data.regions[i];
+                            let region_id_lower = region.id.toLowerCase();
+                            
+                            if (prefix.includes(region_id_lower) || region_id_lower.includes(prefix)) {
+                                this.current_region_name = region.name;
+                                return;
                             }
                         }
                     }
