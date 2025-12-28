@@ -76,34 +76,73 @@ if [ ! -f /etc/pia-credentials ]; then
     chmod 600 /etc/pia-credentials
     echo "Please edit /etc/pia-credentials with your PIA username and password"
     read -p "Press enter when ready..."
+else
+    echo "⚠️  /etc/pia-credentials already exists"
+    read -p "Do you want to backup and replace it? (y/n): " replace_creds
+    if [ "$replace_creds" = "y" ]; then
+        cp /etc/pia-credentials /etc/pia-credentials.backup.$(date +%s)
+        echo "✓ Backup created at /etc/pia-credentials.backup.*"
+        cp config/pia-credentials.example /etc/pia-credentials
+        chmod 600 /etc/pia-credentials
+        echo "Please edit /etc/pia-credentials with your PIA username and password"
+        read -p "Press enter when ready..."
+    fi
+fi
+
+# Validate credentials format (basic check)
+if [ -f /etc/pia-credentials ]; then
+    if ! grep -q "PIA_USER=" /etc/pia-credentials || ! grep -q "PIA_PASS=" /etc/pia-credentials; then
+        echo "⚠️  Warning: /etc/pia-credentials may be incomplete"
+        echo "Please ensure it contains PIA_USER and PIA_PASS"
+    fi
 fi
 
 # Create persistence directory
 mkdir -p /var/lib/pia
 chmod 0755 /var/lib/pia
 
-# Configure sudoers for passwordless commands
+# Configure sudoers for passwordless commands (IMPROVED SECURITY)
 echo "Configuring sudoers for passwordless sudo..."
-SUDOERS_LINE="%sudo ALL=(ALL) NOPASSWD: /usr/bin/sed, /usr/bin/systemctl, /bin/chmod, /bin/rm, /usr/bin/wg-quick"
 SUDOERS_FILE="/etc/sudoers.d/pia-vpn"
 
-# Check if line already exists
-if ! grep -q "NOPASSWD: /usr/bin/sed" "$SUDOERS_FILE" 2>/dev/null; then
-    # Create temporary file and validate syntax
-    echo "$SUDOERS_LINE" > /tmp/pia-sudoers-tmp
-    
-    # Validate sudoers syntax
-    if visudo -c -f /tmp/pia-sudoers-tmp >/dev/null 2>&1; then
-        mv /tmp/pia-sudoers-tmp "$SUDOERS_FILE"
-        chmod 0440 "$SUDOERS_FILE"
-        echo "✓ Sudoers configured successfully"
-    else
-        echo "✗ Error: Invalid sudoers syntax. Aborting."
-        rm -f /tmp/pia-sudoers-tmp
-        exit 1
-    fi
+# Create secure sudoers content
+cat > /tmp/pia-sudoers-tmp << 'EOF'
+# PIA VPN Control - Specific Commands Only
+# This file allows the Cinnamon applet to control PIA VPN without password prompts
+
+# Define command aliases for better organization and security
+Cmnd_Alias PIA_SED = /usr/bin/sed -i [!-]* /etc/pia-credentials
+Cmnd_Alias PIA_SYSTEMCTL_START = /usr/bin/systemctl start pia-vpn.service, \
+                                  /usr/bin/systemctl start pia-port-forward.service
+Cmnd_Alias PIA_SYSTEMCTL_STOP = /usr/bin/systemctl stop pia-vpn.service, \
+                                 /usr/bin/systemctl stop pia-port-forward.service
+Cmnd_Alias PIA_SYSTEMCTL_RESTART = /usr/bin/systemctl restart pia-vpn.service, \
+                                    /usr/bin/systemctl restart pia-port-forward.service
+Cmnd_Alias PIA_SYSTEMCTL_STATUS = /usr/bin/systemctl status pia-vpn.service, \
+                                   /usr/bin/systemctl status pia-port-forward.service, \
+                                   /usr/bin/systemctl status pia-token-renew.service, \
+                                   /usr/bin/systemctl status pia-token-renew.timer
+Cmnd_Alias PIA_WG = /usr/bin/wg-quick up pia, \
+                    /usr/bin/wg-quick down pia
+Cmnd_Alias PIA_EDITOR = /usr/bin/xed /etc/pia-credentials
+Cmnd_Alias PIA_CHMOD = /bin/chmod 644 /etc/pia-credentials, \
+                       /bin/chmod 640 /etc/pia-credentials
+
+# Allow sudo group to run these specific PIA commands without password
+%sudo ALL=(ALL) NOPASSWD: PIA_SED, PIA_SYSTEMCTL_START, PIA_SYSTEMCTL_STOP, \
+                          PIA_SYSTEMCTL_RESTART, PIA_SYSTEMCTL_STATUS, \
+                          PIA_WG, PIA_EDITOR, PIA_CHMOD
+EOF
+
+# Validate sudoers syntax before installing
+if visudo -c -f /tmp/pia-sudoers-tmp >/dev/null 2>&1; then
+    mv /tmp/pia-sudoers-tmp "$SUDOERS_FILE"
+    chmod 0440 "$SUDOERS_FILE"
+    echo "✓ Sudoers configured successfully (restricted to specific commands)"
 else
-    echo "✓ Sudoers already configured"
+    echo "✗ Error: Invalid sudoers syntax. Aborting."
+    rm -f /tmp/pia-sudoers-tmp
+    exit 1
 fi
 
 # Ensure region.txt has correct permissions
@@ -134,10 +173,15 @@ echo "4. Check status with: systemctl status pia-vpn.service"
 echo "5. Add the PIA VPN applet to your Cinnamon panel:"
 echo "   - Right-click the panel"
 echo "   - Select 'Add applets to panel'"
-echo "   - Find 'PIA VPN' and click to add"
+echo "   - Find 'PIA VPN Control' and click to add"
 echo
 echo "To toggle port forwarding on/off later:"
 echo "  sudo xed /etc/pia-credentials  (change PIA_PF setting)"
 echo "  sudo systemctl restart pia-port-forward.service"
+echo
+echo "Security improvements applied:"
+echo "  • Sudoers restricted to specific PIA commands only"
+echo "  • Credentials backup created if file existed"
+echo "  • All installed with validated syntax"
 echo
 echo "Applet location: $APPLET_DIR"
