@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Patched port_forwarding.sh with graceful handling for non-PF servers
+# FIXED: Port file now written on every bind cycle, not just once
 set -euo pipefail
 
 # Simple tool checks
@@ -82,6 +83,33 @@ red=${red:-}
 green=${green:-}
 nc=${nc:-}
 
+# Helper function to write port file atomically
+write_port_file() {
+  local port=$1
+  local expires_at=$2
+  
+  # Strip nanoseconds from ISO8601 format if present
+  # Input: "2026-02-25T18:02:41.37845301Z"
+  # Output: "2026-02-25T18:02:41Z"
+  local expires_at_clean="${expires_at%.*}Z"
+  
+  local EXPIRY_UNIX
+  if EXPIRY_UNIX=$(/bin/date -d "$expires_at_clean" +%s 2>/dev/null); then
+    :
+  else
+    # Fallback: port expires in ~60 days (2 months)
+    EXPIRY_UNIX=$(($(date +%s) + 5184000))
+  fi
+  
+  local tmp
+  tmp="$(/bin/mktemp "${PERSIST_DIR}/forwarded_port.XXXX")"
+  printf '%s %s\n' "$port" "$EXPIRY_UNIX" > "$tmp"
+  /bin/chmod 0644 "$tmp"
+  /bin/mv -f "$tmp" "$PORT_FILE"
+  
+  echo "✓ Port file written: $PORT_FILE (port=$port, expiry=$(/bin/date -d @"$EXPIRY_UNIX" --iso-8601=seconds))"
+}
+
 # If a saved port exists and is still valid, prefer reusing it.
 if [ -f "$PORT_FILE" ]; then
   read SAVED_PORT SAVED_EXPIRY < "$PORT_FILE" || true
@@ -149,7 +177,7 @@ Payload   ${green}$payload${nc}
 
 --> The port is ${green}$port${nc} and it will expire on ${red}$expires_at${nc}. <--
 
-Trying to bind the port... "
+"
 
 # Persist token atomically
 if [ -n "${PIA_TOKEN:-}" ]; then
@@ -159,31 +187,16 @@ if [ -n "${PIA_TOKEN:-}" ]; then
   /bin/mv -f "$tmp" "$TOKEN_FILE"
 fi
 
-# Persist port + expiry atomically (convert expiry to unix epoch)
-if [ -n "${expires_at:-}" ]; then
-  # Strip nanoseconds from ISO8601 format if present
-  # Input: "2026-02-25T18:02:41.37845301Z"
-  # Output: "2026-02-25T18:02:41Z"
-  expires_at_clean="${expires_at%.*}Z"
-  
-  if EXPIRY_UNIX=$(/bin/date -d "$expires_at_clean" +%s 2>/dev/null); then
-    :
-  else
-    # Fallback: port expires in ~60 days (2 months)
-    EXPIRY_UNIX=$(($(date +%s) + 5184000))
-  fi
-  
-  tmp="$(/bin/mktemp "${PERSIST_DIR}/forwarded_port.XXXX")"
-  printf '%s %s\n' "$port" "$EXPIRY_UNIX" > "$tmp"
-  /bin/chmod 0644 "$tmp"
-  /bin/mv -f "$tmp" "$PORT_FILE"
-  
-  # Update firewall immediately after getting new port
-  /usr/local/bin/pia-firewall-update-wrapper.sh || true
-fi
+# Write the port file for the FIRST time (before entering loop)
+write_port_file "$port" "$expires_at"
+
+# Update firewall immediately after getting new port
+/usr/local/bin/pia-firewall-update-wrapper.sh || true
 
 # Bind and keepalive loop
 while true; do
+  echo "Trying to bind port $port..."
+  
   if ! bind_port_response="$(retry 5 2 /usr/bin/curl -Gs -m 5 \
     --connect-to "${PF_HOSTNAME}::${PF_GATEWAY}:" \
     --cacert "ca.rsa.4096.crt" \
@@ -201,6 +214,10 @@ while true; do
     >&2 echo "Response: $bind_port_response"
     exit 1
   fi
+
+  # CRITICAL FIX: Write port file on EVERY successful bind
+  # This ensures the file always exists and is up-to-date
+  write_port_file "$port" "$expires_at"
 
   echo -e Forwarded port'\t'"${green}$port${nc}"
   echo -e Refreshed on'\t'"${green}$(/bin/date)${nc}"
