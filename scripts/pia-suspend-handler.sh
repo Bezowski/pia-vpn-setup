@@ -200,7 +200,8 @@ case "$1" in
     fi
     
     echo "$(date): System ready for suspend"
-    notify_if_enabled suspend
+    # REMOVED: notify_if_enabled suspend
+    log_metric log-suspend
     ;;
     
   post)
@@ -248,7 +249,8 @@ case "$1" in
         if restart_port_forwarding; then
           echo "$(date): ✅ Resume complete - VPN healthy, fresh port assigned"
           NEW_PORT=$(awk '{print $1}' /var/lib/pia/forwarded_port 2>/dev/null || echo "Unknown")
-          notify_if_enabled resume "$NEW_PORT"
+          # REMOVED: notify_if_enabled resume "$NEW_PORT"
+          log_metric log-resume "$NEW_PORT"
         else
           echo "$(date): ⚠️  Resume complete - VPN healthy, port assignment in progress"
         fi

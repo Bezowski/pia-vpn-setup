@@ -113,11 +113,11 @@ sudo xed /etc/pia-credentials
 sudo /usr/local/bin/pia-notify.sh test
 ```
 
-Notification events include:
+Notification events:
 - VPN connected/disconnected with region and IP
-- Suspend/resume with fresh port assignment
-- Token renewal success/failure
-- Port forwarding changes
+- Suspend/resume events
+
+Note: Notifications are configured to only show VPN reconnection events, not port forwarding or token renewal changes.
 
 ### Metrics and Statistics
 

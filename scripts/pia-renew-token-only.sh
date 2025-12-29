@@ -4,17 +4,8 @@
 
 set -euo pipefail
 
-# Notification wrapper
-notify_if_enabled() {
-    local notifications_enabled="true"
-    if [ -f /etc/pia-credentials ]; then
-        source /etc/pia-credentials
-        notifications_enabled=${PIA_NOTIFICATIONS:-"true"}
-    fi
-    if [ "$notifications_enabled" = "true" ]; then
-        /usr/local/bin/pia-notify.sh "$@" 2>/dev/null || true
-    fi
-}
+# Notification wrapper - REMOVED (no notifications for token renewal)
+# notify_if_enabled() { ... }
 
 # Metrics logging wrapper
 log_metric() {
@@ -33,7 +24,6 @@ fi
 # Validate credentials are set
 if [ -z "${PIA_USER:-}" ] || [ -z "${PIA_PASS:-}" ]; then
   >&2 echo "ERROR: PIA_USER and PIA_PASS must be set in $CRED_FILE"
-  notify_if_enabled token-failed
   log_metric log-token-failed
   exit 1
 fi
@@ -65,7 +55,6 @@ if [ -z "$NEW_TOKEN" ]; then
   >&2 echo "  - Invalid username/password in $CRED_FILE"
   >&2 echo "  - PIA account has no active subscription"
   >&2 echo "  - PIA API is unreachable"
-  notify_if_enabled token-failed
   log_metric log-token-failed
   exit 1
 fi
@@ -80,7 +69,7 @@ LOG_MSG="Token renewed successfully at $(date '+%Y-%m-%d %H:%M:%S'), expires $EX
 
 echo "$LOG_MSG"
 logger -t pia-token-renew "$LOG_MSG"
-notify_if_enabled token-renewed
+# REMOVED: notify_if_enabled token-renewed
 log_metric log-token-renewed
 
 # Optional: also save expiry timestamp for reference
