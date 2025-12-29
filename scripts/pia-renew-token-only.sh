@@ -4,9 +4,6 @@
 
 set -euo pipefail
 
-# Notification wrapper - REMOVED (no notifications for token renewal)
-# notify_if_enabled() { ... }
-
 # Metrics logging wrapper
 log_metric() {
     /usr/local/bin/pia-metrics.sh "$@" 2>/dev/null || true
@@ -59,9 +56,11 @@ if [ -z "$NEW_TOKEN" ]; then
   exit 1
 fi
 
-# Save the new token (simple format: just the token string)
-echo "$NEW_TOKEN" > "$TOKEN_FILE"
-chmod 0600 "$TOKEN_FILE"
+# ATOMIC WRITE: Save the new token using temporary file + atomic move
+TMP_TOKEN=$(mktemp "${TOKEN_FILE}.XXXX")
+echo "$NEW_TOKEN" > "$TMP_TOKEN"
+chmod 0600 "$TMP_TOKEN"
+mv -f "$TMP_TOKEN" "$TOKEN_FILE"
 
 # Log success
 EXPIRY_DATE=$(date -d '24 hours' '+%Y-%m-%d %H:%M:%S')
@@ -69,12 +68,13 @@ LOG_MSG="Token renewed successfully at $(date '+%Y-%m-%d %H:%M:%S'), expires $EX
 
 echo "$LOG_MSG"
 logger -t pia-token-renew "$LOG_MSG"
-# REMOVED: notify_if_enabled token-renewed
 log_metric log-token-renewed
 
-# Optional: also save expiry timestamp for reference
+# ATOMIC WRITE: Optional expiry timestamp file
 EXPIRY_UNIX=$(($(date +%s) + 86400))
-echo "$NEW_TOKEN $EXPIRY_UNIX" > "${TOKEN_FILE}.with-expiry"
-chmod 0600 "${TOKEN_FILE}.with-expiry"
+TMP_EXPIRY=$(mktemp "${TOKEN_FILE}.with-expiry.XXXX")
+echo "$NEW_TOKEN $EXPIRY_UNIX" > "$TMP_EXPIRY"
+chmod 0600 "$TMP_EXPIRY"
+mv -f "$TMP_EXPIRY" "${TOKEN_FILE}.with-expiry"
 
 exit 0

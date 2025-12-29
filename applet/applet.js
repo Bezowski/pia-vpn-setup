@@ -29,33 +29,49 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         this.set_applet_tooltip("PIA VPN");
     }
     
+    log(message) {
+        global.log(`[PIA VPN Applet] ${message}`);
+    }
+    
+    logError(message, error) {
+        global.logError(`[PIA VPN Applet] ${message}: ${error}`);
+    }
+    
     on_applet_added_to_panel() {
-        if (!this._menu_manager) {
-            this._menu_manager = new PopupMenu.PopupMenuManager(this);
-            this._menu = new Applet.AppletPopupMenu(this, this.orientation);
-            this._menu_manager.addMenu(this._menu);
+        try {
+            if (!this._menu_manager) {
+                this._menu_manager = new PopupMenu.PopupMenuManager(this);
+                this._menu = new Applet.AppletPopupMenu(this, this.orientation);
+                this._menu_manager.addMenu(this._menu);
+            }
+            
+            this._buildMenu();
+            this.fetch_servers_data();
+            
+            // Initial status check
+            Mainloop.timeout_add_seconds(1, Lang.bind(this, () => {
+                this.update_status();
+                return false;
+            }));
+            
+            // Start inotify monitoring for file changes
+            this._setupInotifyMonitoring();
+        } catch(e) {
+            this.logError("Failed to add applet to panel", e);
         }
-        
-        this._buildMenu();
-        this.fetch_servers_data();
-        
-        // Initial status check
-        Mainloop.timeout_add_seconds(1, Lang.bind(this, () => {
-            this.update_status();
-            return false;
-        }));
-        
-        // Start inotify monitoring for file changes
-        this._setupInotifyMonitoring();
     }
     
     on_applet_removed_from_panel() {
-        this._stopInotifyMonitoring();
-        
-        if (this._menu_manager) {
-            this._menu_manager.removeMenu(this._menu);
-            this._menu = null;
-            this._menu_manager = null;
+        try {
+            this._stopInotifyMonitoring();
+            
+            if (this._menu_manager) {
+                this._menu_manager.removeMenu(this._menu);
+                this._menu = null;
+                this._menu_manager = null;
+            }
+        } catch(e) {
+            this.logError("Failed to remove applet from panel", e);
         }
     }
     
@@ -77,9 +93,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             this._readInotifyLine(stream, proc);
             
         } catch(e) {
-            // Fallback: if inotify fails, do nothing - polling is disabled
-            // but manual updates on menu open will still work
-            this.log("inotify setup failed: " + e);
+            this.logError("inotify setup failed (falling back to manual updates)", e);
         }
     }
     
@@ -99,10 +113,11 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                     this._readInotifyLine(stream, proc);
                 } else {
                     // Stream ended
+                    this.log("inotify stream ended");
                     this._inotify_process = null;
                 }
             } catch(e) {
-                this.log("inotify read error: " + e);
+                this.logError("inotify read error", e);
                 this._inotify_process = null;
             }
         }));
@@ -113,60 +128,68 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             try {
                 this._inotify_process.force_exit();
             } catch(e) {
-                // Already terminated
+                this.logError("Failed to stop inotify process", e);
             }
             this._inotify_process = null;
         }
     }
     
     on_applet_clicked() {
-        if (this._menu) {
-            if (!this._menu.isOpen) {
-                // Update status when menu opens (in case inotify missed something)
-                this.update_status();
+        try {
+            if (this._menu) {
+                if (!this._menu.isOpen) {
+                    // Update status when menu opens (in case inotify missed something)
+                    this.update_status();
+                }
+                this._menu.toggle();
             }
-            this._menu.toggle();
+        } catch(e) {
+            this.logError("Failed to toggle menu", e);
         }
     }
     
     _buildMenu() {
-        this._menu.removeAll();
-        
-        this.status_item = new PopupMenu.PopupMenuItem("Loading...", { reactive: false });
-        this._menu.addMenuItem(this.status_item);
-        
-        this.port_item = new PopupMenu.PopupMenuItem("Port: -", { reactive: false });
-        this._menu.addMenuItem(this.port_item);
-        
-        this.region_item = new PopupMenu.PopupMenuItem("Region: Unknown", { reactive: false });
-        this._menu.addMenuItem(this.region_item);
-        
-        this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        
-        this.toggle_item = new PopupMenu.PopupMenuItem("Disconnect");
-        this.toggle_item.connect('activate', Lang.bind(this, this.on_toggle_vpn));
-        this._menu.addMenuItem(this.toggle_item);
-        
-        this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        
-        this.servers_menu_item = new PopupMenu.PopupSubMenuMenuItem("Select Server");
-        this._menu.addMenuItem(this.servers_menu_item);
-        
-        if (this.servers_data) {
-            this.populate_servers_menu();
+        try {
+            this._menu.removeAll();
+            
+            this.status_item = new PopupMenu.PopupMenuItem("Loading...", { reactive: false });
+            this._menu.addMenuItem(this.status_item);
+            
+            this.port_item = new PopupMenu.PopupMenuItem("Port: -", { reactive: false });
+            this._menu.addMenuItem(this.port_item);
+            
+            this.region_item = new PopupMenu.PopupMenuItem("Region: Unknown", { reactive: false });
+            this._menu.addMenuItem(this.region_item);
+            
+            this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            
+            this.toggle_item = new PopupMenu.PopupMenuItem("Disconnect");
+            this.toggle_item.connect('activate', Lang.bind(this, this.on_toggle_vpn));
+            this._menu.addMenuItem(this.toggle_item);
+            
+            this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            
+            this.servers_menu_item = new PopupMenu.PopupSubMenuMenuItem("Select Server");
+            this._menu.addMenuItem(this.servers_menu_item);
+            
+            if (this.servers_data) {
+                this.populate_servers_menu();
+            }
+            
+            this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            
+            let refreshItem = new PopupMenu.PopupMenuItem("Find Fastest Server");
+            refreshItem.connect('activate', Lang.bind(this, this.on_check_servers));
+            this._menu.addMenuItem(refreshItem);
+            
+            this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            
+            let settingsItem = new PopupMenu.PopupMenuItem("Settings");
+            settingsItem.connect('activate', Lang.bind(this, this.on_open_settings));
+            this._menu.addMenuItem(settingsItem);
+        } catch(e) {
+            this.logError("Failed to build menu", e);
         }
-        
-        this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        
-        let refreshItem = new PopupMenu.PopupMenuItem("Find Fastest Server");
-        refreshItem.connect('activate', Lang.bind(this, this.on_check_servers));
-        this._menu.addMenuItem(refreshItem);
-        
-        this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        
-        let settingsItem = new PopupMenu.PopupMenuItem("Settings");
-        settingsItem.connect('activate', Lang.bind(this, this.on_open_settings));
-        this._menu.addMenuItem(settingsItem);
     }
     
     fetch_servers_data() {
@@ -180,33 +203,39 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 json_text = json_text.split('\n')[0];
                 this.servers_data = JSON.parse(json_text);
                 this.populate_servers_menu();
+            } else {
+                this.logError("Failed to fetch servers data", "Command returned failure");
             }
         } catch(e) {
-            // Silently fail
+            this.logError("Failed to fetch or parse servers data", e);
         }
     }
     
     populate_servers_menu() {
-        if (!this.servers_data || !this.servers_data.regions) {
-            return;
-        }
-        
-        this.servers_menu_item.menu.removeAll();
-        
-        let regions = this.servers_data.regions.slice();
-        regions.sort((a, b) => a.name.localeCompare(b.name));
-        
-        for (let i = 0; i < regions.length; i++) {
-            let region = regions[i];
-            let menu_item = new PopupMenu.PopupMenuItem(region.name);
+        try {
+            if (!this.servers_data || !this.servers_data.regions) {
+                return;
+            }
             
-            (Lang.bind(this, function(rid, rname) {
-                menu_item.connect('activate', Lang.bind(this, function() {
-                    this.on_select_server(rid, rname);
-                }));
-            }))(region.id, region.name);
+            this.servers_menu_item.menu.removeAll();
             
-            this.servers_menu_item.menu.addMenuItem(menu_item);
+            let regions = this.servers_data.regions.slice();
+            regions.sort((a, b) => a.name.localeCompare(b.name));
+            
+            for (let i = 0; i < regions.length; i++) {
+                let region = regions[i];
+                let menu_item = new PopupMenu.PopupMenuItem(region.name);
+                
+                (Lang.bind(this, function(rid, rname) {
+                    menu_item.connect('activate', Lang.bind(this, function() {
+                        this.on_select_server(rid, rname);
+                    }));
+                }))(region.id, region.name);
+                
+                this.servers_menu_item.menu.addMenuItem(menu_item);
+            }
+        } catch(e) {
+            this.logError("Failed to populate servers menu", e);
         }
     }
     
@@ -248,24 +277,28 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                                     }));
                                 }
                             } catch(e) {
-                                // Error updating
+                                this.logError("Failed to update AUTOCONNECT setting", e);
                             }
                         }));
                     }
                 } catch(e) {
-                    // Error updating
+                    this.logError("Failed to update PREFERRED_REGION setting", e);
                 }
             }));
         } catch(e) {
-            // Error selecting server
+            this.logError("Failed to select server", e);
         }
     }
     
     update_status() {
-        this.check_vpn_status();
-        this.get_forwarded_port();
-        this.get_current_region();
-        this.update_ui();
+        try {
+            this.check_vpn_status();
+            this.get_forwarded_port();
+            this.get_current_region();
+            this.update_ui();
+        } catch(e) {
+            this.logError("Failed to update status", e);
+        }
     }
     
     check_vpn_status() {
@@ -273,6 +306,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             let [success, out] = GLib.spawn_command_line_sync('ip addr show pia');
             this.is_connected = success && out.toString().indexOf("inet ") !== -1;
         } catch(e) {
+            this.logError("Failed to check VPN status", e);
             this.is_connected = false;
         }
     }
@@ -291,6 +325,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             }
             this.current_port = null;
         } catch(e) {
+            this.logError("Failed to get forwarded port", e);
             this.current_port = null;
         }
     }
@@ -323,20 +358,19 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                             }
                         }
                         
-                        // Fallback: try matching hostname prefix (e.g., "sydney" in "sydney.privateinternetaccess.com")
+                        // Fallback: try matching hostname prefix
                         let prefix = hostname.split('.')[0].toLowerCase();
                         for (let i = 0; i < this.servers_data.regions.length; i++) {
                             let region = this.servers_data.regions[i];
                             let region_name_lower = region.name.toLowerCase();
                             
-                            // Check if region name contains the prefix (handles "AU Sydney" -> contains "sydney")
                             if (region_name_lower.includes(prefix)) {
                                 this.current_region_name = region.name;
                                 return;
                             }
                         }
                         
-                        // Last resort: try matching against region ID if available
+                        // Last resort: try matching against region ID
                         for (let i = 0; i < this.servers_data.regions.length; i++) {
                             let region = this.servers_data.regions[i];
                             let region_id_lower = region.id.toLowerCase();
@@ -351,53 +385,58 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             }
             this.current_region_name = null;
         } catch(e) {
+            this.logError("Failed to get current region", e);
             this.current_region_name = null;
         }
     }
     
     update_ui() {
-        if (!this.status_item) return;
-        
-        if (this.is_connected) {
-            this.set_applet_icon_path(this.metadata.path + "/icons/connected.png");
-            this.status_item.label.set_text("✓ Connected");
-        } else {
-            this.set_applet_icon_path(this.metadata.path + "/icons/disconnected.png");
-            this.status_item.label.set_text("✗ Disconnected");
-        }
-        
-        if (this.toggle_item) {
-            let new_text = this.is_connected ? "Disconnect" : "Connect";
-            if (new_text !== this._last_toggle_text) {
-                this.toggle_item.label.set_text(new_text);
-                this._last_toggle_text = new_text;
+        try {
+            if (!this.status_item) return;
+            
+            if (this.is_connected) {
+                this.set_applet_icon_path(this.metadata.path + "/icons/connected.png");
+                this.status_item.label.set_text("✓ Connected");
+            } else {
+                this.set_applet_icon_path(this.metadata.path + "/icons/disconnected.png");
+                this.status_item.label.set_text("✗ Disconnected");
             }
-        }
-        
-        if (this.port_item) {
-            this.port_item.label.set_text(
-                (this.is_connected && this.current_port) ? 
-                "Port: " + this.current_port : 
-                "Port: Not forwarded"
-            );
-        }
-        
-        if (this.region_item) {
-            this.region_item.label.set_text(
-                "Region: " + (this.current_region_name || "Unknown")
-            );
-        }
-        
-        let tooltip = "PIA VPN";
-        if (this.is_connected) {
-            tooltip = this.current_region_name || "Connected";
-            if (this.current_port) {
-                tooltip += " • Port: " + this.current_port;
+            
+            if (this.toggle_item) {
+                let new_text = this.is_connected ? "Disconnect" : "Connect";
+                if (new_text !== this._last_toggle_text) {
+                    this.toggle_item.label.set_text(new_text);
+                    this._last_toggle_text = new_text;
+                }
             }
-        } else {
-            tooltip = "Disconnected";
+            
+            if (this.port_item) {
+                this.port_item.label.set_text(
+                    (this.is_connected && this.current_port) ? 
+                    "Port: " + this.current_port : 
+                    "Port: Not forwarded"
+                );
+            }
+            
+            if (this.region_item) {
+                this.region_item.label.set_text(
+                    "Region: " + (this.current_region_name || "Unknown")
+                );
+            }
+            
+            let tooltip = "PIA VPN";
+            if (this.is_connected) {
+                tooltip = this.current_region_name || "Connected";
+                if (this.current_port) {
+                    tooltip += " • Port: " + this.current_port;
+                }
+            } else {
+                tooltip = "Disconnected";
+            }
+            this.set_applet_tooltip(tooltip);
+        } catch(e) {
+            this.logError("Failed to update UI", e);
         }
-        this.set_applet_tooltip(tooltip);
     }
     
     on_toggle_vpn() {
@@ -413,7 +452,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 return false;
             }));
         } catch(e) {
-            // Error toggling VPN
+            this.logError("Failed to toggle VPN", e);
         }
     }
     
@@ -445,11 +484,11 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                         }));
                     }
                 } catch(e) {
-                    // Error
+                    this.logError("Failed to enable autoconnect", e);
                 }
             }));
         } catch(e) {
-            // Error checking servers
+            this.logError("Failed to check servers", e);
         }
     }
     
@@ -457,7 +496,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         try {
             Gio.Subprocess.new(['sudo', 'xed', '/etc/pia-credentials'], Gio.SubprocessFlags.NONE);
         } catch(e) {
-            // Error opening settings
+            this.logError("Failed to open settings", e);
         }
     }
 };
