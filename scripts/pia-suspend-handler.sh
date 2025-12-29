@@ -16,6 +16,11 @@ notify_if_enabled() {
     fi
 }
 
+# Metrics logging wrapper
+log_metric() {
+    /usr/local/bin/pia-metrics.sh "$@" 2>/dev/null || true
+}
+
 # Helper function: Wait for network to be ready
 wait_for_network() {
   local max_wait=30

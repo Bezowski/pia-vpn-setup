@@ -16,6 +16,11 @@ notify_if_enabled() {
     fi
 }
 
+# Metrics logging wrapper
+log_metric() {
+    /usr/local/bin/pia-metrics.sh "$@" 2>/dev/null || true
+}
+
 CRED_FILE="/etc/pia-credentials"
 PERSIST_DIR=/var/lib/pia
 TOKEN_FILE="$PERSIST_DIR/token.txt"
@@ -29,6 +34,7 @@ fi
 if [ -z "${PIA_USER:-}" ] || [ -z "${PIA_PASS:-}" ]; then
   >&2 echo "ERROR: PIA_USER and PIA_PASS must be set in $CRED_FILE"
   notify_if_enabled token-failed
+  log_metric log-token-failed
   exit 1
 fi
 
@@ -60,6 +66,7 @@ if [ -z "$NEW_TOKEN" ]; then
   >&2 echo "  - PIA account has no active subscription"
   >&2 echo "  - PIA API is unreachable"
   notify_if_enabled token-failed
+  log_metric log-token-failed
   exit 1
 fi
 
@@ -74,6 +81,7 @@ LOG_MSG="Token renewed successfully at $(date '+%Y-%m-%d %H:%M:%S'), expires $EX
 echo "$LOG_MSG"
 logger -t pia-token-renew "$LOG_MSG"
 notify_if_enabled token-renewed
+log_metric log-token-renewed
 
 # Optional: also save expiry timestamp for reference
 EXPIRY_UNIX=$(($(date +%s) + 86400))

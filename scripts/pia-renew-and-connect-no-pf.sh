@@ -14,6 +14,11 @@ notify_if_enabled() {
     fi
 }
 
+# Metrics logging wrapper
+log_metric() {
+    /usr/local/bin/pia-metrics.sh "$@" 2>/dev/null || true
+}
+
 LOCKFILE=/var/lock/pia-renew-and-connect.lock
 mkdir -p /var/lock
 exec 200>"$LOCKFILE"
@@ -60,6 +65,7 @@ disconnect_vpn() {
   echo "Disconnecting current VPN connection..."
   wg-quick down pia 2>/dev/null || true
   notify_if_enabled vpn-disconnected "Reconnecting to new region"
+  log_metric log-vpn-disconnected "Reconnecting to new region"
   sleep 2
 }
 
@@ -86,6 +92,7 @@ get_and_persist_token() {
   else
     echo "  ✗ Token file not found"
     notify_if_enabled token-failed
+    log_metric log-token-failed
     return 1
   fi
 }
@@ -156,6 +163,7 @@ echo "✅ VPN connected"
 REGION=$(awk -F= '/^hostname=/ {print $2}' "$PERSIST_DIR/region.txt" 2>/dev/null || echo "Unknown")
 PUBLIC_IP=$(curl -s --max-time 5 https://api.ipify.org || echo "Unknown")
 notify_if_enabled vpn-connected "$REGION" "$PUBLIC_IP"
+log_metric log-vpn-connected "$REGION" "$PUBLIC_IP"
 
 echo "Port forwarding managed by pia-port-forward.service"
 systemctl list-timers pia-token-renew.timer --no-pager | grep pia-token-renew || true
