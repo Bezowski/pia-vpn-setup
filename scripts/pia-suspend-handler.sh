@@ -1,7 +1,6 @@
 #!/bin/bash
 # Handle PIA VPN on suspend/resume
-# Strategy: Always do a full reconnect on resume to guarantee working connection
-# Improved: Better network waiting, no arbitrary sleeps
+# Strategy: Always get fresh port on resume by restarting port-forward service
 
 set -euo pipefail
 
@@ -70,6 +69,41 @@ test_vpn_connectivity() {
   fi
 }
 
+# Helper function: Restart port forwarding with fresh port
+restart_port_forwarding() {
+  echo "$(date): Restarting port forwarding to get fresh port..."
+  
+  # Stop the service completely (kills the long-running script)
+  systemctl stop pia-port-forward.service 2>/dev/null || true
+  sleep 2
+  
+  # Delete old port file to force fresh assignment
+  rm -f /var/lib/pia/forwarded_port
+  echo "$(date): Deleted old port file"
+  
+  # Start the service (will get new signature and port)
+  systemctl start pia-port-forward.service 2>/dev/null || true
+  echo "$(date): Started pia-port-forward.service"
+  
+  # Wait for new port to be assigned (max 45 seconds - increased timeout)
+  local port_wait=0
+  while [ $port_wait -lt 45 ]; do
+    if [ -f /var/lib/pia/forwarded_port ]; then
+      NEW_PORT=$(awk '{print $1}' /var/lib/pia/forwarded_port 2>/dev/null || echo "")
+      if [ -n "$NEW_PORT" ] && [ "$NEW_PORT" != "0" ]; then
+        echo "$(date): ✅ Got fresh forwarded port: $NEW_PORT"
+        return 0
+      fi
+    fi
+    sleep 1
+    port_wait=$((port_wait + 1))
+  done
+  
+  echo "$(date): ⚠️  Port forwarding taking longer than expected"
+  echo "$(date): Service is running, port will arrive soon"
+  return 1
+}
+
 # Helper function: Full VPN reconnection
 reconnect_vpn() {
   echo "$(date): ===== Starting full VPN reconnection ====="
@@ -92,40 +126,20 @@ reconnect_vpn() {
       echo "$(date): ✓ VPN connectivity verified"
       
       # Step 5: Handle port forwarding
-      local cred_file="/etc/pia-credentials"
-      local pia_pf="false"
+      CRED_FILE="/etc/pia-credentials"
+      PIA_PF_SETTING="false"
       
-      if [ -f "$cred_file" ]; then
-        source "$cred_file"
-        pia_pf=${PIA_PF:-"false"}
+      if [ -f "$CRED_FILE" ]; then
+        source "$CRED_FILE"
+        PIA_PF_SETTING=${PIA_PF:-"false"}
       fi
       
-      if [ "$pia_pf" = "true" ]; then
-        echo "$(date): Port forwarding enabled, getting fresh port..."
-        
-        # Delete old port file to force fresh assignment
-        rm -f /var/lib/pia/forwarded_port
-        
-        # Start port forwarding service
-        systemctl start pia-port-forward.service 2>/dev/null || true
-        
-        # Wait for new port to be assigned (max 30 seconds)
-        local port_wait=0
-        while [ $port_wait -lt 30 ]; do
-          if [ -f /var/lib/pia/forwarded_port ]; then
-            NEW_PORT=$(awk '{print $1}' /var/lib/pia/forwarded_port 2>/dev/null || echo "")
-            if [ -n "$NEW_PORT" ]; then
-              echo "$(date): ✅ Got fresh forwarded port: $NEW_PORT"
-              echo "$(date): ✅ VPN and port forwarding fully restored"
-              return 0
-            fi
-          fi
-          sleep 1
-          port_wait=$((port_wait + 1))
-        done
-        
-        echo "$(date): ⚠️  VPN reconnected but port forwarding delayed"
-        echo "$(date): Port forwarding service is running, port will arrive soon"
+      if [ "$PIA_PF_SETTING" = "true" ]; then
+        if restart_port_forwarding; then
+          echo "$(date): ✅ VPN and port forwarding fully restored"
+        else
+          echo "$(date): ⚠️  VPN reconnected but port forwarding delayed"
+        fi
       else
         echo "$(date): ✅ VPN reconnected (port forwarding disabled)"
       fi
@@ -147,16 +161,16 @@ case "$1" in
     echo "$(date): ===== SUSPEND: Preparing for sleep ====="
     
     # Check if port forwarding is enabled
-    local cred_file="/etc/pia-credentials"
-    local pia_pf="false"
+    CRED_FILE="/etc/pia-credentials"
+    PIA_PF_SETTING="false"
     
-    if [ -f "$cred_file" ]; then
-      source "$cred_file"
-      pia_pf=${PIA_PF:-"false"}
+    if [ -f "$CRED_FILE" ]; then
+      source "$CRED_FILE"
+      PIA_PF_SETTING=${PIA_PF:-"false"}
     fi
     
-    if [ "$pia_pf" = "true" ]; then
-      echo "$(date): Stopping port forwarding (VPN connection will be maintained)"
+    if [ "$PIA_PF_SETTING" = "true" ]; then
+      echo "$(date): Stopping port forwarding service before suspend"
       systemctl stop pia-port-forward.service 2>/dev/null || true
       echo "$(date): Port forwarding stopped"
     else
@@ -169,7 +183,7 @@ case "$1" in
   post)
     echo "$(date): ===== RESUME: Waking from sleep ====="
     
-    # Wait for network to stabilize (no arbitrary sleep!)
+    # Wait for network to stabilize
     wait_for_network
     
     echo "$(date): Checking current VPN status..."
@@ -195,39 +209,26 @@ case "$1" in
       echo "$(date): ✓ VPN connectivity is good"
       
       # Check if port forwarding is enabled
-      local cred_file="/etc/pia-credentials"
-      local pia_pf="false"
+      CRED_FILE="/etc/pia-credentials"
+      PIA_PF_SETTING="false"
       
-      if [ -f "$cred_file" ]; then
-        source "$cred_file"
-        pia_pf=${PIA_PF:-"false"}
+      if [ -f "$CRED_FILE" ]; then
+        source "$CRED_FILE"
+        PIA_PF_SETTING=${PIA_PF:-"false"}
       fi
       
-      if [ "$pia_pf" = "true" ]; then
-        # Just refresh port forwarding
-        echo "$(date): Refreshing port forwarding..."
-        rm -f /var/lib/pia/forwarded_port
-        systemctl start pia-port-forward.service 2>/dev/null || true
+      if [ "$PIA_PF_SETTING" = "true" ]; then
+        # CRITICAL: After suspend, we MUST restart port-forward service
+        # The old signature is stale, we need a fresh one
+        echo "$(date): Port forwarding enabled, getting fresh port after resume..."
         
-        # Wait for port (max 30 seconds)
-        local port_wait=0
-        while [ $port_wait -lt 30 ]; do
-          if [ -f /var/lib/pia/forwarded_port ]; then
-            NEW_PORT=$(awk '{print $1}' /var/lib/pia/forwarded_port 2>/dev/null || echo "")
-            if [ -n "$NEW_PORT" ]; then
-              echo "$(date): ✅ Got fresh forwarded port: $NEW_PORT"
-              echo "$(date): ✅ Resume complete - VPN healthy, port refreshed"
-              exit 0
-            fi
-          fi
-          sleep 1
-          port_wait=$((port_wait + 1))
-        done
-        
-        echo "$(date): ⚠️  Port forwarding taking longer than expected"
-        echo "$(date): Service is running, port will arrive soon"
+        if restart_port_forwarding; then
+          echo "$(date): ✅ Resume complete - VPN healthy, fresh port assigned"
+        else
+          echo "$(date): ⚠️  Resume complete - VPN healthy, port assignment in progress"
+        fi
       else
-        echo "$(date): ✅ Resume complete - VPN healthy"
+        echo "$(date): ✅ Resume complete - VPN healthy (port forwarding disabled)"
       fi
       
       exit 0
