@@ -25,6 +25,12 @@ apt install -y wireguard-tools curl jq inotify-tools
 # Try to install openresolv if available (optional for some distros)
 apt install -y openresolv 2>/dev/null || echo "⚠️  openresolv not available (optional)"
 
+# Copy common library FIRST (so other scripts can use it)
+echo "Installing common library..."
+cp scripts/pia-common.sh /usr/local/bin/
+chmod +x /usr/local/bin/pia-common.sh
+echo "✓ Common library installed"
+
 # Copy scripts
 echo "Installing scripts..."
 cp scripts/pia-renew-and-connect-no-pf.sh /usr/local/bin/
@@ -33,12 +39,20 @@ cp scripts/pia-suspend-handler.sh /usr/local/bin/
 cp scripts/update-firewall-for-port.sh /usr/local/bin/
 cp scripts/pia-port-forward-wrapper.sh /usr/local/bin/
 cp scripts/pia-firewall-update-wrapper.sh /usr/local/bin/
+cp scripts/pia-metrics.sh /usr/local/bin/
+cp scripts/pia-stats.sh /usr/local/bin/
+cp scripts/pia-notify.sh /usr/local/bin/
+cp scripts/pia-health-check.sh /usr/local/bin/
 chmod +x /usr/local/bin/pia-renew-and-connect-no-pf.sh
 chmod +x /usr/local/bin/pia-renew-token-only.sh
 chmod +x /usr/local/bin/pia-suspend-handler.sh
 chmod +x /usr/local/bin/update-firewall-for-port.sh
 chmod +x /usr/local/bin/pia-port-forward-wrapper.sh
 chmod +x /usr/local/bin/pia-firewall-update-wrapper.sh
+chmod +x /usr/local/bin/pia-metrics.sh
+chmod +x /usr/local/bin/pia-stats.sh
+chmod +x /usr/local/bin/pia-notify.sh
+chmod +x /usr/local/bin/pia-health-check.sh
 
 # Copy PIA manual connections scripts (with our modifications)
 echo "Installing PIA manual-connections scripts..."
@@ -100,6 +114,10 @@ fi
 # Create persistence directory
 mkdir -p /var/lib/pia
 chmod 0755 /var/lib/pia
+
+# Create metrics directory
+mkdir -p /var/lib/pia/metrics
+chmod 0755 /var/lib/pia/metrics
 
 # Configure sudoers for passwordless commands (IMPROVED SECURITY)
 echo "Configuring sudoers for passwordless sudo..."
@@ -183,5 +201,6 @@ echo "Security improvements applied:"
 echo "  • Sudoers restricted to specific PIA commands only"
 echo "  • Credentials backup created if file existed"
 echo "  • All installed with validated syntax"
+echo "  • Common library available for future script updates"
 echo
 echo "Applet location: $APPLET_DIR"
