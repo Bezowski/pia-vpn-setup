@@ -1,0 +1,32 @@
+# Logrotate configuration for PIA VPN metrics
+
+/var/lib/pia/metrics/vpn-metrics.log {
+    # Rotate weekly
+    weekly
+    
+    # Keep 4 weeks of history
+    rotate 4
+    
+    # Compress old logs
+    compress
+    delaycompress
+    
+    # Don't error if log is missing
+    missingok
+    
+    # Don't rotate if empty
+    notifempty
+    
+    # Create new file with these permissions
+    create 0644 root root
+    
+    # Don't mail old logs
+    nomail
+    
+    # Date extension for rotated files (e.g., vpn-metrics.log-20251230)
+    dateext
+    dateformat -%Y%m%d
+    
+    # Use date instead of number suffix
+    extension .log
+}
