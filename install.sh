@@ -70,17 +70,37 @@ cp systemd/pia-suspend.service /etc/systemd/system/
 
 # Install Cinnamon applet
 echo "Installing Cinnamon applet..."
-APPLET_DIR="/usr/share/cinnamon/applets/pia-vpn@bezowski"
-mkdir -p "$APPLET_DIR/icons"
-cp applet/applet.js "$APPLET_DIR/"
-cp applet/metadata.json "$APPLET_DIR/"
-cp applet/settings-schema.json "$APPLET_DIR/"
-cp applet/icons/connected.png "$APPLET_DIR/icons/"
-cp applet/icons/disconnected.png "$APPLET_DIR/icons/"
-chmod 644 "$APPLET_DIR/applet.js"
-chmod 644 "$APPLET_DIR/metadata.json"
-chmod 644 "$APPLET_DIR/settings-schema.json"
-chmod 644 "$APPLET_DIR/icons"/*
+
+# Detect the real user (not root)
+if [ -n "$SUDO_USER" ]; then
+    REAL_USER="$SUDO_USER"
+else
+    REAL_USER=$(who | awk '{print $1}' | grep -v root | head -n1)
+fi
+
+if [ -z "$REAL_USER" ]; then
+    echo "⚠️  Could not detect non-root user, skipping applet installation"
+    echo "To install manually: cp -r applet/ ~/.local/share/cinnamon/applets/pia-vpn@bezowski/"
+else
+    REAL_USER_HOME=$(eval echo ~$REAL_USER)
+    APPLET_DIR="$REAL_USER_HOME/.local/share/cinnamon/applets/pia-vpn@bezowski"
+    
+    mkdir -p "$APPLET_DIR/icons"
+    cp applet/applet.js "$APPLET_DIR/"
+    cp applet/metadata.json "$APPLET_DIR/"
+    cp applet/settings-schema.json "$APPLET_DIR/"
+    cp applet/icons/connected.png "$APPLET_DIR/icons/"
+    cp applet/icons/disconnected.png "$APPLET_DIR/icons/"
+    
+    # Set ownership to the real user
+    chown -R "$REAL_USER:$REAL_USER" "$APPLET_DIR"
+    chmod 644 "$APPLET_DIR/applet.js"
+    chmod 644 "$APPLET_DIR/metadata.json"
+    chmod 644 "$APPLET_DIR/settings-schema.json"
+    chmod 644 "$APPLET_DIR/icons"/*
+    
+    echo "✓ Applet installed to $APPLET_DIR"
+fi
 
 # Setup credentials
 echo
@@ -213,4 +233,9 @@ echo "  • Credentials backup created if file existed"
 echo "  • All installed with validated syntax"
 echo "  • Common library available for future script updates"
 echo
-echo "Applet location: $APPLET_DIR"
+if [ -n "$REAL_USER" ]; then
+    REAL_USER_HOME=$(eval echo ~$REAL_USER)
+    echo "Applet location: $REAL_USER_HOME/.local/share/cinnamon/applets/pia-vpn@bezowski"
+else
+    echo "Applet not installed (could not detect user)"
+fi

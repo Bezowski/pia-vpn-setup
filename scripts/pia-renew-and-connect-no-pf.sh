@@ -2,18 +2,6 @@
 # Connect to PIA VPN on boot, testing all regions to find the fastest
 set -euo pipefail
 
-# Notification wrapper
-notify_if_enabled() {
-    local notifications_enabled="true"
-    if [ -f /etc/pia-credentials ]; then
-        source /etc/pia-credentials
-        notifications_enabled=${PIA_NOTIFICATIONS:-"true"}
-    fi
-    if [ "$notifications_enabled" = "true" ]; then
-        /usr/local/bin/pia-notify.sh "$@" 2>/dev/null || true
-    fi
-}
-
 # Metrics logging wrapper
 log_metric() {
     /usr/local/bin/pia-metrics.sh "$@" 2>/dev/null || true
@@ -64,7 +52,6 @@ region_changed() {
 disconnect_vpn() {
   echo "Disconnecting current VPN connection..."
   wg-quick down pia 2>/dev/null || true
-  notify_if_enabled vpn-disconnected "Reconnecting to new region"
   log_metric log-vpn-disconnected "Reconnecting to new region"
   sleep 2
 }
@@ -91,7 +78,6 @@ get_and_persist_token() {
     return 0
   else
     echo "  ✗ Token file not found"
-    notify_if_enabled token-failed
     log_metric log-token-failed
     return 1
   fi
@@ -162,7 +148,6 @@ systemctl start pia-port-forward.service &
 echo "✅ VPN connected"
 REGION=$(awk -F= '/^hostname=/ {print $2}' "$PERSIST_DIR/region.txt" 2>/dev/null || echo "Unknown")
 PUBLIC_IP=$(curl -s --max-time 5 https://api.ipify.org || echo "Unknown")
-notify_if_enabled vpn-connected "$REGION" "$PUBLIC_IP"
 log_metric log-vpn-connected "$REGION" "$PUBLIC_IP"
 
 echo "Port forwarding managed by pia-port-forward.service"

@@ -24,6 +24,8 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         this.current_region_name = null;
         this.servers_data = null;
         this._last_toggle_text = null;
+        this.connection_quality = null;
+        this._port_test_in_progress = false;
         
         this.set_applet_icon_path(this.metadata.path + "/icons/disconnected.png");
         this.set_applet_tooltip("PIA VPN");
@@ -77,7 +79,6 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     
     _setupInotifyMonitoring() {
         try {
-            // Monitor /var/lib/pia/ for changes to forwarded_port and region.txt
             let proc = new Gio.Subprocess({
                 argv: ['inotifywait', '-m', '-e', 'modify,create', '/var/lib/pia/'],
                 flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
@@ -86,7 +87,6 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             proc.init(null);
             this._inotify_process = proc;
             
-            // Read output asynchronously
             let stdout = proc.get_stdout_pipe();
             let stream = new Gio.DataInputStream({ base_stream: stdout });
             
@@ -103,16 +103,13 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 let [line, length] = stream.read_line_finish(result);
                 
                 if (line !== null) {
-                    // Any change to /var/lib/pia/ triggers an update
                     Mainloop.idle_add(Lang.bind(this, () => {
                         this.update_status();
                         return false;
                     }));
                     
-                    // Continue reading
                     this._readInotifyLine(stream, proc);
                 } else {
-                    // Stream ended
                     this.log("inotify stream ended");
                     this._inotify_process = null;
                 }
@@ -138,7 +135,6 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         try {
             if (this._menu) {
                 if (!this._menu.isOpen) {
-                    // Update status when menu opens (in case inotify missed something)
                     this.update_status();
                 }
                 this._menu.toggle();
@@ -152,8 +148,12 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         try {
             this._menu.removeAll();
             
+            // Status section
             this.status_item = new PopupMenu.PopupMenuItem("Loading...", { reactive: false });
             this._menu.addMenuItem(this.status_item);
+            
+            this.quality_item = new PopupMenu.PopupMenuItem("Quality: Checking...", { reactive: false });
+            this._menu.addMenuItem(this.quality_item);
             
             this.port_item = new PopupMenu.PopupMenuItem("Port: -", { reactive: false });
             this._menu.addMenuItem(this.port_item);
@@ -163,12 +163,30 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             
             this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             
-            this.toggle_item = new PopupMenu.PopupMenuItem("Disconnect");
-            this.toggle_item.connect('activate', Lang.bind(this, this.on_toggle_vpn));
-            this._menu.addMenuItem(this.toggle_item);
+            // Quick actions section
+            this.disconnect_item = new PopupMenu.PopupMenuItem("Disconnect");
+            this.disconnect_item.connect('activate', Lang.bind(this, this.on_quick_disconnect));
+            this._menu.addMenuItem(this.disconnect_item);
+            
+            this.reconnect_item = new PopupMenu.PopupMenuItem("Reconnect");
+            this.reconnect_item.connect('activate', Lang.bind(this, this.on_quick_reconnect));
+            this._menu.addMenuItem(this.reconnect_item);
             
             this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             
+            // Port test button (always show, will be disabled if no port)
+            this.port_test_item = new PopupMenu.PopupMenuItem("Test Port", { reactive: false });
+            this._menu.addMenuItem(this.port_test_item);
+            
+            // Add clickable area that doesn't close menu
+            this.port_test_item.actor.connect('button-press-event', Lang.bind(this, function() {
+                this.on_test_port();
+                return true; // Prevent menu from closing
+            }));
+            
+            this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            
+            // Server selection
             this.servers_menu_item = new PopupMenu.PopupSubMenuMenuItem("Select Server");
             this._menu.addMenuItem(this.servers_menu_item);
             
@@ -295,6 +313,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             this.check_vpn_status();
             this.get_forwarded_port();
             this.get_current_region();
+            this.check_connection_quality();
             this.update_ui();
         } catch(e) {
             this.logError("Failed to update status", e);
@@ -308,6 +327,46 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         } catch(e) {
             this.logError("Failed to check VPN status", e);
             this.is_connected = false;
+        }
+    }
+    
+    check_connection_quality() {
+        if (!this.is_connected) {
+            this.connection_quality = null;
+            return;
+        }
+        
+        try {
+            // Quick ping test to PIA DNS server
+            let [success, output] = GLib.spawn_command_line_sync(
+                'ping -c 1 -W 2 10.0.0.243'
+            );
+            
+            if (success) {
+                let output_str = imports.byteArray.toString(output);
+                let match = output_str.match(/time=([0-9.]+)\s*ms/);
+                
+                if (match) {
+                    let latency = parseFloat(match[1]);
+                    
+                    if (latency < 50) {
+                        this.connection_quality = "Excellent (" + Math.round(latency) + "ms)";
+                    } else if (latency < 100) {
+                        this.connection_quality = "Good (" + Math.round(latency) + "ms)";
+                    } else if (latency < 200) {
+                        this.connection_quality = "Fair (" + Math.round(latency) + "ms)";
+                    } else {
+                        this.connection_quality = "Poor (" + Math.round(latency) + "ms)";
+                    }
+                } else {
+                    this.connection_quality = "Unknown";
+                }
+            } else {
+                this.connection_quality = "No response";
+            }
+        } catch(e) {
+            this.logError("Failed to check connection quality", e);
+            this.connection_quality = "Error";
         }
     }
     
@@ -342,7 +401,6 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                     if (match && this.servers_data && this.servers_data.regions) {
                         let hostname = match[1];
                         
-                        // First, try exact match on 'cn' field
                         for (let i = 0; i < this.servers_data.regions.length; i++) {
                             let region = this.servers_data.regions[i];
                             for (let protocol in region.servers) {
@@ -358,7 +416,6 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                             }
                         }
                         
-                        // Fallback: try matching hostname prefix
                         let prefix = hostname.split('.')[0].toLowerCase();
                         for (let i = 0; i < this.servers_data.regions.length; i++) {
                             let region = this.servers_data.regions[i];
@@ -370,7 +427,6 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                             }
                         }
                         
-                        // Last resort: try matching against region ID
                         for (let i = 0; i < this.servers_data.regions.length; i++) {
                             let region = this.servers_data.regions[i];
                             let region_id_lower = region.id.toLowerCase();
@@ -402,11 +458,14 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 this.status_item.label.set_text("✗ Disconnected");
             }
             
-            if (this.toggle_item) {
-                let new_text = this.is_connected ? "Disconnect" : "Connect";
-                if (new_text !== this._last_toggle_text) {
-                    this.toggle_item.label.set_text(new_text);
-                    this._last_toggle_text = new_text;
+            // Update connection quality
+            if (this.quality_item) {
+                if (this.is_connected && this.connection_quality) {
+                    this.quality_item.label.set_text("Quality: " + this.connection_quality);
+                } else if (this.is_connected) {
+                    this.quality_item.label.set_text("Quality: Checking...");
+                } else {
+                    this.quality_item.label.set_text("Quality: N/A");
                 }
             }
             
@@ -418,6 +477,22 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 );
             }
             
+            // Update port test button state and make clickable/non-clickable
+            if (this.port_test_item) {
+                if (this.current_port && !this._port_test_in_progress) {
+                    this.port_test_item.actor.reactive = true;
+                    this.port_test_item.actor.can_focus = true;
+                    this.port_test_item.label.set_text("Test Port " + this.current_port);
+                } else if (this._port_test_in_progress) {
+                    this.port_test_item.actor.reactive = false;
+                    this.port_test_item.actor.can_focus = false;
+                } else {
+                    this.port_test_item.actor.reactive = false;
+                    this.port_test_item.actor.can_focus = false;
+                    this.port_test_item.label.set_text("Test Port (No port)");
+                }
+            }
+            
             if (this.region_item) {
                 this.region_item.label.set_text(
                     "Region: " + (this.current_region_name || "Unknown")
@@ -427,6 +502,9 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             let tooltip = "PIA VPN";
             if (this.is_connected) {
                 tooltip = this.current_region_name || "Connected";
+                if (this.connection_quality) {
+                    tooltip += " • " + this.connection_quality;
+                }
                 if (this.current_port) {
                     tooltip += " • Port: " + this.current_port;
                 }
@@ -439,20 +517,101 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         }
     }
     
-    on_toggle_vpn() {
+    on_quick_disconnect() {
         try {
-            if (this.is_connected) {
-                Gio.Subprocess.new(['sudo', 'wg-quick', 'down', 'pia'], Gio.SubprocessFlags.NONE);
-            } else {
-                Gio.Subprocess.new(['sudo', 'wg-quick', 'up', 'pia'], Gio.SubprocessFlags.NONE);
-            }
+            Gio.Subprocess.new(['sudo', 'wg-quick', 'down', 'pia'], Gio.SubprocessFlags.NONE);
             
             Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
                 this.update_status();
                 return false;
             }));
         } catch(e) {
-            this.logError("Failed to toggle VPN", e);
+            this.logError("Failed to disconnect VPN", e);
+        }
+    }
+    
+    on_quick_reconnect() {
+        try {
+            // Disconnect first
+            Gio.Subprocess.new(['sudo', 'wg-quick', 'down', 'pia'], Gio.SubprocessFlags.NONE);
+            
+            // Wait a moment, then reconnect
+            Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
+                Gio.Subprocess.new(['sudo', 'wg-quick', 'up', 'pia'], Gio.SubprocessFlags.NONE);
+                
+                Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
+                    this.update_status();
+                    return false;
+                }));
+                return false;
+            }));
+        } catch(e) {
+            this.logError("Failed to reconnect VPN", e);
+        }
+    }
+    
+    on_test_port() {
+        if (this._port_test_in_progress) {
+            return;
+        }
+        
+        if (!this.current_port) {
+            return;
+        }
+        
+        try {
+            this._port_test_in_progress = true;
+            if (this.port_test_item) {
+                this.port_test_item.label.set_text("Testing port " + this.current_port + "...");
+            }
+            
+            let port = this.current_port;
+            let url = "https://www.slsknet.org/porttest.php?port=" + port;
+            
+            let proc = Gio.Subprocess.new(
+                ['curl', '-s', '--max-time', '10', url],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
+            );
+            
+            proc.communicate_utf8_async(null, null, Lang.bind(this, (proc, result) => {
+                try {
+                    let [, stdout, stderr] = proc.communicate_utf8_finish(result);
+                    
+                    if (stdout && stdout.indexOf('open') !== -1) {
+                        if (this.port_test_item) {
+                            this.port_test_item.label.set_text("✓ Port " + port + " is OPEN");
+                        }
+                    } else if (stdout && stdout.indexOf('CLOSED') !== -1) {
+                        if (this.port_test_item) {
+                            this.port_test_item.label.set_text("✗ Port " + port + " is CLOSED");
+                        }
+                    } else {
+                        if (this.port_test_item) {
+                            this.port_test_item.label.set_text("⚠ Port test failed");
+                        }
+                    }
+                    
+                    // Reset button after 3 seconds
+                    Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
+                        if (this.port_test_item) {
+                            this.port_test_item.label.set_text("Test Port");
+                        }
+                        this._port_test_in_progress = false;
+                        return false;
+                    }));
+                    
+                } catch(e) {
+                    this.logError("Port test failed", e);
+                    if (this.port_test_item) {
+                        this.port_test_item.label.set_text("✗ Test failed");
+                    }
+                    this._port_test_in_progress = false;
+                }
+            }));
+            
+        } catch(e) {
+            this.logError("Failed to initiate port test", e);
+            this._port_test_in_progress = false;
         }
     }
     

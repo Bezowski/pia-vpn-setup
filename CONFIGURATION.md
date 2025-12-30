@@ -23,7 +23,6 @@ AUTOCONNECT="true"               # Auto-connect to fastest server
 PREFERRED_REGION="none"          # Let PIA choose
 DISABLE_IPV6="yes"               # Prevent IPv6 leaks
 PIA_DNS="true"                   # Use PIA DNS servers
-PIA_NOTIFICATIONS="true"         # Desktop notifications
 ```
 
 **Benefits:**
@@ -46,7 +45,6 @@ AUTOCONNECT="true"               # Auto-connect to PF-enabled server
 PREFERRED_REGION="none"          # Let PIA choose (PF-enabled only)
 DISABLE_IPV6="yes"               # Prevent IPv6 leaks
 PIA_DNS="true"                   # Use PIA DNS servers
-PIA_NOTIFICATIONS="true"         # Desktop notifications
 ```
 
 **Important Notes:**
@@ -75,7 +73,6 @@ AUTOCONNECT="false"              # Use specific region
 PREFERRED_REGION="uk_london"     # Your chosen region
 DISABLE_IPV6="yes"               # Prevent IPv6 leaks
 PIA_DNS="true"                   # Use PIA DNS servers
-PIA_NOTIFICATIONS="true"         # Desktop notifications
 ```
 
 **Available Regions:**
@@ -116,7 +113,6 @@ AUTOCONNECT="false"              # Manual control
 PREFERRED_REGION="au_sydney"     # Change as needed
 DISABLE_IPV6="yes"               # Prevent IPv6 leaks
 PIA_DNS="true"                   # Use PIA DNS servers
-PIA_NOTIFICATIONS="true"         # Get feedback on connections
 ```
 
 **Quick Region Switching:**
@@ -135,7 +131,7 @@ sudo systemctl restart pia-vpn.service
 
 ---
 
-### 5. Server/Headless Setup (No Notifications)
+### 5. Server/Headless Setup
 
 **Use Case**: Raspberry Pi, home server, NAS, headless system
 
@@ -147,7 +143,6 @@ AUTOCONNECT="true"               # Auto-connect on boot
 PREFERRED_REGION="none"          # Auto-select
 DISABLE_IPV6="yes"               # Prevent IPv6 leaks
 PIA_DNS="true"                   # Use PIA DNS servers
-PIA_NOTIFICATIONS="false"        # No desktop notifications
 ```
 
 **Monitoring:**
@@ -176,7 +171,6 @@ AUTOCONNECT="true"               # Auto-connect always
 PREFERRED_REGION="none"          # Let PIA choose
 DISABLE_IPV6="yes"               # CRITICAL: Prevent leaks
 PIA_DNS="true"                   # CRITICAL: Use PIA DNS only
-PIA_NOTIFICATIONS="true"         # Monitor connections
 ```
 
 **Additional Security Measures:**
@@ -322,9 +316,8 @@ firefox "https://www.slsknet.org/porttest.php?port=$PORT"
 1. **Always use strong, unique password** for PIA account
 2. **Enable IPv6 disable** (`DISABLE_IPV6="yes"`)
 3. **Use PIA DNS** unless you have specific reason not to
-4. **Enable notifications** to catch connection issues
-5. **Run health check** after configuration changes
-6. **Backup configuration** before making changes:
+4. **Run health check** after configuration changes
+5. **Backup configuration** before making changes:
    ```bash
    sudo cp /etc/pia-credentials /etc/pia-credentials.backup
    ```
@@ -344,9 +337,6 @@ sudo systemctl restart pia-vpn.service
 
 # 3. If changing port forwarding only:
 sudo systemctl restart pia-port-forward.service
-
-# 4. If changing notifications only:
-# No restart needed - takes effect on next event
 ```
 
 ---

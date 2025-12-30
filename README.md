@@ -8,7 +8,6 @@ Automated PIA VPN setup with WireGuard, port forwarding, and systemd integration
 * ✅ Token renewal every 23 hours (silent, no VPN disconnection)
 * ✅ Automatic port forwarding with firewall updates
 * ✅ Survives suspend/resume with fresh port assignment
-* ✅ Desktop notifications for VPN reconnection events
 * ✅ Comprehensive metrics logging and analysis
 * ✅ Health check script with detailed diagnostics
 * ✅ **Cinnamon applet for easy server selection and VPN management**
@@ -105,25 +104,6 @@ The health check validates:
 - IPv6 configuration
 - External connectivity
 
-### Desktop Notifications
-
-Enable or disable notifications:
-
-```bash
-# Enable notifications
-sudo xed /etc/pia-credentials
-# Set: PIA_NOTIFICATIONS="true"
-
-# Test notifications
-sudo /usr/local/bin/pia-notify.sh test
-```
-
-Notification events:
-- VPN connected/disconnected with region and IP
-- VPN connection failures
-
-Note: Notifications are configured to only show VPN reconnection events, not port forwarding, token renewal, or suspend/resume events. This keeps notifications focused on what matters - when your VPN connection changes.
-
 ### Metrics and Statistics
 
 View VPN usage statistics:
@@ -178,9 +158,6 @@ PIA_PF="true"                    # Enable/disable port forwarding
 AUTOCONNECT="true"               # Auto-connect on boot
 PREFERRED_REGION="none"          # Specific region or "none" for auto-select
 DISABLE_IPV6="yes"               # Prevent IPv6 leaks
-
-# Optional Features
-PIA_NOTIFICATIONS="true"         # Desktop notifications
 ```
 
 **For detailed configuration examples and scenarios**, see [CONFIGURATION.md](CONFIGURATION.md)
@@ -226,9 +203,10 @@ journalctl -u pia-suspend.service -f
 5. Check firewall: `sudo ufw status`
 
 **Notifications not appearing:**
-1. Test notifications: `sudo /usr/local/bin/pia-notify.sh test`
-2. Ensure `PIA_NOTIFICATIONS="true"` in `/etc/pia-credentials`
-3. Check if notify-send is installed: `which notify-send`
+1. Notifications have been removed from this setup
+2. Use the Cinnamon applet to monitor VPN status
+3. Check metrics with: `sudo /usr/local/bin/pia-stats.sh dashboard`
+4. View logs: `journalctl -u pia-vpn.service -f`
 
 **After suspend/resume:**
 The system automatically handles suspend/resume:
