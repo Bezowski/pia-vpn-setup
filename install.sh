@@ -169,6 +169,16 @@ if [ -f /var/lib/pia/region.txt ]; then
     chmod 644 /var/lib/pia/region.txt
 fi
 
+# Install logrotate configuration
+echo "Installing logrotate configuration..."
+if [ -f "config/pia-vpn" ]; then
+    cp config/pia-vpn /etc/logrotate.d/
+    chmod 644 /etc/logrotate.d/pia-vpn
+    echo "✓ Logrotate configuration installed"
+else
+    echo "⚠️  config/pia-vpn not found, skipping logrotate configuration"
+fi
+
 # Reload systemd
 echo "Reloading systemd..."
 systemctl daemon-reload
