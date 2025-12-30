@@ -4,21 +4,26 @@ Automated PIA VPN setup with WireGuard, port forwarding, and systemd integration
 
 ## Features
 
-* ✅ Automatic VPN connection on boot
-* ✅ Token renewal every 23 hours
+* ✅ Automatic VPN connection on boot (fastest region or selected region)
+* ✅ Token renewal every 23 hours (silent, no VPN disconnection)
 * ✅ Automatic port forwarding with firewall updates
 * ✅ Survives suspend/resume with fresh port assignment
-* ✅ Desktop notifications for VPN events
+* ✅ Desktop notifications for VPN reconnection events
 * ✅ Comprehensive metrics logging and analysis
 * ✅ Health check script with detailed diagnostics
-* ✅ Lightweight (no GUI client needed)
+* ✅ **Cinnamon applet for easy server selection and VPN management**
+* ✅ Atomic file writes to prevent race conditions
+* ✅ Shared function library for maintainability
+* ✅ Automatic log rotation (prevents unbounded growth)
+* ✅ Lightweight (no official GUI client needed)
 
 ## Requirements
 
 * Ubuntu/Debian-based Linux (tested on Linux Mint 22.2)
+* Cinnamon desktop environment (for applet support)
 * PIA subscription
 * sudo access
-* WireGuard, curl, jq, inotify-tools
+* UFW (firewall) - for automatic port rule management
 
 ## Installation
 
@@ -115,9 +120,9 @@ sudo /usr/local/bin/pia-notify.sh test
 
 Notification events:
 - VPN connected/disconnected with region and IP
-- Suspend/resume events
+- VPN connection failures
 
-Note: Notifications are configured to only show VPN reconnection events, not port forwarding or token renewal changes.
+Note: Notifications are configured to only show VPN reconnection events, not port forwarding, token renewal, or suspend/resume events. This keeps notifications focused on what matters - when your VPN connection changes.
 
 ### Metrics and Statistics
 
@@ -177,6 +182,8 @@ DISABLE_IPV6="yes"               # Prevent IPv6 leaks
 # Optional Features
 PIA_NOTIFICATIONS="true"         # Desktop notifications
 ```
+
+**For detailed configuration examples and scenarios**, see [CONFIGURATION.md](CONFIGURATION.md)
 
 Available regions can be found by running:
 
@@ -243,15 +250,17 @@ sudo ./run_setup.sh
 ```
 /etc/pia-credentials                        # Configuration file
 /usr/local/bin/pia-*.sh                     # Core scripts
+/usr/local/bin/pia-common.sh                # Shared function library
 /usr/local/bin/manual-connections/          # PIA connection scripts
 /var/lib/pia/                               # Runtime data
   ├── token.txt                             # Authentication token
   ├── region.txt                            # Current region info
   ├── forwarded_port                        # Current forwarded port
   └── metrics/                              # Metrics and statistics
-      ├── vpn-metrics.log                   # Event log
+      ├── vpn-metrics.log                   # Event log (auto-rotated)
       └── stats.json                        # Statistics cache
 /etc/systemd/system/pia-*.service           # Systemd services
+/etc/logrotate.d/pia-vpn                    # Log rotation config
 ```
 
 ## Modified Scripts
@@ -260,6 +269,11 @@ The following PIA manual-connections scripts have been modified from the origina
 
 * `port_forwarding.sh` - Updated permissions for forwarded_port file (644 instead of 600)
 * `connect_to_wireguard_with_token.sh` - Added Network Manager applet reload
+
+Additional improvements:
+* Atomic token file writes to prevent race conditions
+* Shared function library (`pia-common.sh`) for code reuse
+* Enhanced error logging throughout
 
 Original scripts: https://github.com/pia-foss/manual-connections
 
@@ -293,6 +307,15 @@ sudo wg-quick down pia 2>/dev/null || true
 
 Setup created with assistance from Claude (Anthropic).
 PIA manual-connections scripts: https://github.com/pia-foss/manual-connections
+
+## Contributing
+
+Found a bug or have a suggestion? Please open an issue or submit a pull request!
+
+## Related Documentation
+
+- [CONFIGURATION.md](CONFIGURATION.md) - Detailed configuration examples and scenarios
+- [PIA Manual Connections](https://github.com/pia-foss/manual-connections) - Original PIA scripts
 
 ## License
 
