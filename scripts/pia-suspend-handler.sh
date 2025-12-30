@@ -4,18 +4,6 @@
 
 set -euo pipefail
 
-# Notification wrapper - only sends if enabled in config
-notify_if_enabled() {
-    local notifications_enabled="true"
-    if [ -f /etc/pia-credentials ]; then
-        source /etc/pia-credentials
-        notifications_enabled=${PIA_NOTIFICATIONS:-"true"}
-    fi
-    if [ "$notifications_enabled" = "true" ]; then
-        /usr/local/bin/pia-notify.sh "$@" 2>/dev/null || true
-    fi
-}
-
 # Metrics logging wrapper
 log_metric() {
     /usr/local/bin/pia-metrics.sh "$@" 2>/dev/null || true
@@ -154,15 +142,11 @@ reconnect_vpn() {
       if [ "$PIA_PF_SETTING" = "true" ]; then
         if restart_port_forwarding; then
           echo "$(date): ✅ VPN and port forwarding fully restored"
-          REGION=$(grep "^hostname=" /var/lib/pia/region.txt 2>/dev/null | cut -d= -f2 || echo "Unknown")
-          notify_if_enabled vpn-connected "$REGION" "Reconnected"
         else
           echo "$(date): ⚠️  VPN reconnected but port forwarding delayed"
         fi
       else
         echo "$(date): ✅ VPN reconnected (port forwarding disabled)"
-        REGION=$(grep "^hostname=" /var/lib/pia/region.txt 2>/dev/null | cut -d= -f2 || echo "Unknown")
-        notify_if_enabled vpn-connected "$REGION" "Reconnected"
       fi
       
       return 0
@@ -172,7 +156,6 @@ reconnect_vpn() {
     fi
   else
     echo "$(date): ✗ Failed to reconnect VPN after resume"
-    notify_if_enabled vpn-failed "Failed to reconnect after resume"
     return 1
   fi
 }
@@ -200,7 +183,6 @@ case "$1" in
     fi
     
     echo "$(date): System ready for suspend"
-    # REMOVED: notify_if_enabled suspend
     log_metric log-suspend
     ;;
     
@@ -249,7 +231,6 @@ case "$1" in
         if restart_port_forwarding; then
           echo "$(date): ✅ Resume complete - VPN healthy, fresh port assigned"
           NEW_PORT=$(awk '{print $1}' /var/lib/pia/forwarded_port 2>/dev/null || echo "Unknown")
-          # REMOVED: notify_if_enabled resume "$NEW_PORT"
           log_metric log-resume "$NEW_PORT"
         else
           echo "$(date): ⚠️  Resume complete - VPN healthy, port assignment in progress"
