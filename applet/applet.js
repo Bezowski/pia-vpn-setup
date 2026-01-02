@@ -398,9 +398,21 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                     let text = imports.byteArray.toString(contents);
                     let match = text.match(/hostname=([^\s\n]+)/);
                     
-                    if (match && this.servers_data && this.servers_data.regions) {
-                        let hostname = match[1];
+                    if (match) {
+                        let hostname = match[1].trim();
+                        this.log("Found hostname: " + hostname);
                         
+                        if (!this.servers_data || !this.servers_data.regions) {
+                            this.log("No servers data available");
+                            this.current_region_name = hostname; // Fallback to hostname
+                            return;
+                        }
+                        
+                        // Extract base name (e.g., "sydney428" -> "sydney", "melbourne433" -> "melbourne")
+                        let basename = hostname.replace(/[0-9]+$/, '').toLowerCase();
+                        this.log("Extracted basename: " + basename);
+                        
+                        // Try exact match first
                         for (let i = 0; i < this.servers_data.regions.length; i++) {
                             let region = this.servers_data.regions[i];
                             for (let protocol in region.servers) {
@@ -416,26 +428,25 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                             }
                         }
                         
-                        let prefix = hostname.split('.')[0].toLowerCase();
+                        // Try matching by region ID or name containing basename
                         for (let i = 0; i < this.servers_data.regions.length; i++) {
                             let region = this.servers_data.regions[i];
                             let region_name_lower = region.name.toLowerCase();
+                            let region_id_lower = region.id.toLowerCase();
                             
-                            if (region_name_lower.includes(prefix)) {
+                            // Check if region name or ID contains the basename
+                            if (region_name_lower.includes(basename) || 
+                                basename.includes(region_id_lower) || 
+                                region_id_lower.includes(basename)) {
                                 this.current_region_name = region.name;
                                 return;
                             }
                         }
                         
-                        for (let i = 0; i < this.servers_data.regions.length; i++) {
-                            let region = this.servers_data.regions[i];
-                            let region_id_lower = region.id.toLowerCase();
-                            
-                            if (prefix.includes(region_id_lower) || region_id_lower.includes(prefix)) {
-                                this.current_region_name = region.name;
-                                return;
-                            }
-                        }
+                        // Last resort: use the hostname itself
+                        this.log("No region match found, using hostname");
+                        this.current_region_name = hostname;
+                        return;
                     }
                 }
             }
@@ -477,19 +488,21 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 );
             }
             
-            // Update port test button state and make clickable/non-clickable
+            // Update port test button state
             if (this.port_test_item) {
-                if (this.current_port && !this._port_test_in_progress) {
-                    this.port_test_item.actor.reactive = true;
-                    this.port_test_item.actor.can_focus = true;
-                    this.port_test_item.label.set_text("Test Port " + this.current_port);
-                } else if (this._port_test_in_progress) {
+                if (this._port_test_in_progress) {
                     this.port_test_item.actor.reactive = false;
                     this.port_test_item.actor.can_focus = false;
+                    // Keep current text during test
+                } else if (this.current_port) {
+                    this.port_test_item.actor.reactive = true;
+                    this.port_test_item.actor.can_focus = true;
+                    // Use shorter text to prevent truncation
+                    this.port_test_item.label.set_text("Test Port");
                 } else {
                     this.port_test_item.actor.reactive = false;
                     this.port_test_item.actor.can_focus = false;
-                    this.port_test_item.label.set_text("Test Port (No port)");
+                    this.port_test_item.label.set_text("Test Port");
                 }
             }
             
@@ -561,11 +574,12 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         
         try {
             this._port_test_in_progress = true;
+            let port = this.current_port;
+            
             if (this.port_test_item) {
-                this.port_test_item.label.set_text("Testing port " + this.current_port + "...");
+                this.port_test_item.label.set_text("Testing...");
             }
             
-            let port = this.current_port;
             let url = "https://www.slsknet.org/porttest.php?port=" + port;
             
             let proc = Gio.Subprocess.new(
@@ -579,24 +593,22 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                     
                     if (stdout && stdout.indexOf('open') !== -1) {
                         if (this.port_test_item) {
-                            this.port_test_item.label.set_text("✓ Port " + port + " is OPEN");
+                            this.port_test_item.label.set_text("✓ Port OPEN");
                         }
                     } else if (stdout && stdout.indexOf('CLOSED') !== -1) {
                         if (this.port_test_item) {
-                            this.port_test_item.label.set_text("✗ Port " + port + " is CLOSED");
+                            this.port_test_item.label.set_text("✗ Port CLOSED");
                         }
                     } else {
                         if (this.port_test_item) {
-                            this.port_test_item.label.set_text("⚠ Port test failed");
+                            this.port_test_item.label.set_text("⚠ Test failed");
                         }
                     }
                     
                     // Reset button after 3 seconds
                     Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
-                        if (this.port_test_item) {
-                            this.port_test_item.label.set_text("Test Port");
-                        }
                         this._port_test_in_progress = false;
+                        this.update_ui(); // This will reset to "Test Port"
                         return false;
                     }));
                     
