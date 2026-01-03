@@ -532,7 +532,13 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     
     on_quick_disconnect() {
         try {
-            Gio.Subprocess.new(['sudo', 'wg-quick', 'down', 'pia'], Gio.SubprocessFlags.NONE);
+            // Stop port forwarding first
+            Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'stop', 'pia-port-forward.service'], 
+                Gio.SubprocessFlags.NONE);
+            
+            // Then disconnect VPN
+            Gio.Subprocess.new(['sudo', '-n', 'wg-quick', 'down', 'pia'], 
+                Gio.SubprocessFlags.NONE);
             
             Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
                 this.update_status();
@@ -545,17 +551,12 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     
     on_quick_reconnect() {
         try {
-            // Disconnect first
-            Gio.Subprocess.new(['sudo', 'wg-quick', 'down', 'pia'], Gio.SubprocessFlags.NONE);
+            // Use systemctl restart to get fresh token and config
+            Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'restart', 'pia-vpn.service'], 
+                Gio.SubprocessFlags.NONE);
             
-            // Wait a moment, then reconnect
-            Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
-                Gio.Subprocess.new(['sudo', 'wg-quick', 'up', 'pia'], Gio.SubprocessFlags.NONE);
-                
-                Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
-                    this.update_status();
-                    return false;
-                }));
+            Mainloop.timeout_add_seconds(5, Lang.bind(this, () => {
+                this.update_status();
                 return false;
             }));
         } catch(e) {
