@@ -68,7 +68,6 @@ PIA_PF="true"                    # Enable port forwarding
 AUTOCONNECT="true"               # Auto-connect on boot
 PREFERRED_REGION="none"          # Auto-select optimal region
 DISABLE_IPV6="yes"               # Disable IPv6 to prevent leaks
-PIA_NOTIFICATIONS="true"         # Enable desktop notifications (optional)
 ```
 
 4. Reboot:
@@ -253,12 +252,6 @@ journalctl -u pia-suspend.service -f
 4. Test port: Run health check or manually test at `https://www.slsknet.org/porttest.php?port=YOUR_PORT`
 5. Check firewall: `sudo ufw status`
 
-**Notifications not appearing:**
-1. Notifications have been removed from this setup
-2. Use the Cinnamon applet to monitor VPN status
-3. Check metrics with: `sudo /usr/local/bin/pia-stats.sh dashboard`
-4. View logs: `journalctl -u pia-vpn.service -f`
-
 **After suspend/resume:**
 The system automatically handles suspend/resume:
 - Port forwarding service is stopped on suspend
@@ -274,7 +267,7 @@ cd /usr/local/bin/manual-connections
 sudo ./run_setup.sh
 ```
 
-## What's Included'
+## What's Included
 
 ### Security Scripts
 - `pia-killswitch.sh` - Network kill switch (blocks non-VPN traffic)
