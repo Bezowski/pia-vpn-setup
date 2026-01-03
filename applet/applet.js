@@ -532,6 +532,10 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     
     on_quick_disconnect() {
         try {
+            // Pause watchdog before disconnecting
+            Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-watchdog.sh', 'pause'], 
+                Gio.SubprocessFlags.NONE);
+            
             // Stop port forwarding first
             Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'stop', 'pia-port-forward.service'], 
                 Gio.SubprocessFlags.NONE);
@@ -548,14 +552,18 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             this.logError("Failed to disconnect VPN", e);
         }
     }
-    
+
     on_quick_reconnect() {
         try {
             // Use systemctl restart to get fresh token and config
             Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'restart', 'pia-vpn.service'], 
                 Gio.SubprocessFlags.NONE);
             
-            Mainloop.timeout_add_seconds(5, Lang.bind(this, () => {
+            // Resume watchdog after reconnecting
+            Mainloop.timeout_add_seconds(6, Lang.bind(this, () => {
+                Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-watchdog.sh', 'resume'], 
+                    Gio.SubprocessFlags.NONE);
+                
                 this.update_status();
                 return false;
             }));

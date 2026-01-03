@@ -16,6 +16,20 @@ Automated PIA VPN setup with WireGuard, port forwarding, and systemd integration
 * ✅ Automatic log rotation (prevents unbounded growth)
 * ✅ Lightweight (no official GUI client needed)
 
+## Security Features
+
+- ✅ **Kill Switch** - Blocks all non-VPN traffic to prevent leaks
+  - Exceptions for local network and Tailscale
+  - Prevents IP leaks if VPN drops unexpectedly
+  - Can be enabled/disabled as needed
+  
+- ✅ **Auto-Recovery Watchdog** - Monitors VPN and auto-reconnects on failure
+  - Checks VPN health every 60 seconds
+  - Auto-reconnects after 3 consecutive failures
+  - Respects manual disconnects (won't reconnect when you click "Disconnect")
+  - 5-minute cooldown between reconnect attempts
+  - Comprehensive logging for troubleshooting
+
 ## Requirements
 
 * Ubuntu/Debian-based Linux (tested on Linux Mint 22.2)
@@ -85,6 +99,43 @@ Manual VPN restart:
 ```bash
 sudo systemctl restart pia-vpn.service
 ```
+
+## Security Features Installation
+
+Install the kill switch and watchdog:
+```bash
+sudo ./install-security-features.sh
+```
+
+This will:
+1. Install kill switch script (`pia-killswitch.sh`)
+2. Install watchdog script and service (`pia-watchdog.sh`)
+3. Optionally enable kill switch (blocks non-VPN traffic)
+4. Optionally enable watchdog service (auto-recovery)
+
+### Kill Switch Commands
+```bash
+sudo pia-killswitch.sh enable    # Enable kill switch
+sudo pia-killswitch.sh status    # Check status
+sudo pia-killswitch.sh test      # Run diagnostics
+sudo pia-killswitch.sh disable   # Disable kill switch
+```
+
+**⚠️ Warning:** With kill switch enabled, if VPN drops you will have NO internet until:
+- VPN reconnects automatically (via watchdog), or
+- You manually reconnect, or
+- You disable the kill switch
+
+### Watchdog Commands
+```bash
+sudo systemctl start pia-watchdog     # Start watchdog
+sudo systemctl status pia-watchdog    # Check status
+sudo pia-watchdog.sh pause            # Pause (before manual disconnect)
+sudo pia-watchdog.sh resume           # Resume monitoring
+tail -f /var/log/pia-watchdog.log     # View live log
+```
+
+The watchdog automatically pauses when you click "Disconnect" in the applet and resumes when you click "Reconnect".
 
 ### Health Check
 
@@ -222,6 +273,26 @@ Test VPN connection manually:
 cd /usr/local/bin/manual-connections
 sudo ./run_setup.sh
 ```
+
+## What's Included'
+
+### Security Scripts
+- `pia-killswitch.sh` - Network kill switch (blocks non-VPN traffic)
+- `pia-watchdog.sh` - Auto-recovery monitoring and reconnection
+
+### Systemd Services and Timers
+- `pia-vpn.service` - Main VPN connection service
+- `pia-token-renew.service` - Token renewal service
+- `pia-token-renew.timer` - Token renewal scheduler
+- `pia-port-forward.service` - Port forwarding service
+- `pia-suspend.service` - Suspend/resume handler
+- `pia-watchdog.service` - Auto-recovery watchdog service
+
+### Security & Installation
+- `install.sh` - Main installer
+- `install-security-features.sh` - Install kill switch and watchdog
+- `install-secure-sudoers.sh` - Secure sudoers configuration
+- `uninstall.sh` - Clean uninstaller
 
 ## File Locations
 

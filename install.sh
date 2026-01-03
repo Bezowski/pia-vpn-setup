@@ -233,6 +233,16 @@ echo "  • Credentials backup created if file existed"
 echo "  • All installed with validated syntax"
 echo "  • Common library available for future script updates"
 echo
+echo "Optional Security Features:"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo
+echo "For enhanced security, you can install:"
+echo "  • Kill Switch - Blocks all non-VPN traffic (prevents leaks)"
+echo "  • Watchdog - Auto-reconnects if VPN fails"
+echo
+echo "To install these features:"
+echo "  sudo ./install-security-features.sh"
+echo
 if [ -n "$REAL_USER" ]; then
     REAL_USER_HOME=$(eval echo ~$REAL_USER)
     echo "Applet location: $REAL_USER_HOME/.local/share/cinnamon/applets/pia-vpn@bezowski"

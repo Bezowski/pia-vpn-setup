@@ -1,0 +1,20 @@
+[Unit]
+Description=PIA VPN Watchdog - Auto-recovery monitoring
+After=network-online.target pia-vpn.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pia-watchdog.sh start
+ExecStop=/usr/local/bin/pia-watchdog.sh stop
+Restart=always
+RestartSec=10
+User=root
+StandardOutput=journal
+StandardError=journal
+
+# Logging
+SyslogIdentifier=pia-watchdog
+
+[Install]
+WantedBy=multi-user.target

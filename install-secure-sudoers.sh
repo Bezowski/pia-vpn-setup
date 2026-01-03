@@ -33,11 +33,15 @@ Cmnd_Alias PIA_WG = /usr/bin/wg-quick up pia, \
 Cmnd_Alias PIA_EDITOR = /usr/bin/xed /etc/pia-credentials
 Cmnd_Alias PIA_CHMOD = /bin/chmod 644 /etc/pia-credentials, \
                        /bin/chmod 640 /etc/pia-credentials
+Cmnd_Alias PIA_WATCHDOG = /usr/local/bin/pia-watchdog.sh pause, \
+                          /usr/local/bin/pia-watchdog.sh resume, \
+                          /usr/local/bin/pia-watchdog.sh status, \
+                          /usr/local/bin/pia-watchdog.sh check
 
 # Allow sudo group to run these specific PIA commands without password
 %sudo ALL=(ALL) NOPASSWD: PIA_SED, PIA_SYSTEMCTL_START, PIA_SYSTEMCTL_STOP, \
                           PIA_SYSTEMCTL_RESTART, PIA_SYSTEMCTL_STATUS, \
-                          PIA_WG, PIA_EDITOR, PIA_CHMOD
+                          PIA_WG, PIA_EDITOR, PIA_CHMOD, PIA_WATCHDOG
 SUDOERS_EOF
 
 # Validate syntax
