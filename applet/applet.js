@@ -29,6 +29,8 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         
         this.set_applet_icon_path(this.metadata.path + "/icons/disconnected.png");
         this.set_applet_tooltip("PIA VPN");
+        this.killswitch_enabled = false;
+        this._port_test_in_progress = false;
     }
     
     log(message) {
@@ -185,6 +187,13 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             }));
             
             this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+            // Kill switch toggle
+            this.killswitch_item = new PopupMenu.PopupMenuItem("Kill Switch: Loading...");
+            this.killswitch_item.connect('activate', Lang.bind(this, this.toggle_killswitch));
+            this._menu.addMenuItem(this.killswitch_item);
+
+            this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             
             // Server selection
             this.servers_menu_item = new PopupMenu.PopupSubMenuMenuItem("Select Server");
@@ -259,6 +268,21 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     
     on_select_server(region_id, region_name) {
         try {
+            // Store kill switch state BEFORE disabling
+            if (this.killswitch_enabled) {
+                GLib.spawn_command_line_sync('sudo -n touch /var/lib/pia/killswitch-was-enabled');
+            }
+            
+            // Pause watchdog
+            Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-watchdog.sh', 'pause'], 
+                Gio.SubprocessFlags.NONE);
+            
+            // Disable kill switch if enabled
+            if (this.killswitch_enabled) {
+                Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-killswitch.sh', 'disable'], 
+                    Gio.SubprocessFlags.NONE);
+            }
+            
             let pattern1 = "s/^PREFERRED_REGION=.*/PREFERRED_REGION=" + region_id + "/";
             let pattern2 = "s/^AUTOCONNECT=.*/AUTOCONNECT=false/";
             
@@ -288,7 +312,18 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                                     Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'restart', 'pia-vpn.service'], 
                                         Gio.SubprocessFlags.NONE);
                                     
-                                    Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
+                                    // Use the same reconnect logic as on_quick_reconnect
+                                    Mainloop.timeout_add_seconds(10, Lang.bind(this, () => {
+                                        // Resume watchdog
+                                        Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-watchdog.sh', 'resume'], 
+                                            Gio.SubprocessFlags.NONE);
+                                        
+                                        // Check if kill switch should be re-enabled
+                                        let file = Gio.file_new_for_path('/var/lib/pia/killswitch-was-enabled');
+                                        if (file.query_exists(null)) {
+                                            this._enableKillswitchWhenReady(1);
+                                        }
+                                        
                                         this.update_status();
                                         this._buildMenu();
                                         return false;
@@ -314,6 +349,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             this.get_forwarded_port();
             this.get_current_region();
             this.check_connection_quality();
+            this.check_killswitch_status();
             this.update_ui();
         } catch(e) {
             this.logError("Failed to update status", e);
@@ -367,6 +403,51 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         } catch(e) {
             this.logError("Failed to check connection quality", e);
             this.connection_quality = "Error";
+        }
+    }
+
+    check_killswitch_status() {
+        try {
+            // Check if kill switch nftables table exists
+            let [success, output] = GLib.spawn_command_line_sync('sudo -n nft list tables');
+            
+            if (success) {
+                let output_str = imports.byteArray.toString(output);
+                this.killswitch_enabled = output_str.indexOf('pia_killswitch') !== -1;
+            } else {
+                this.killswitch_enabled = false;
+            }
+        } catch(e) {
+            this.logError("Failed to check kill switch status", e);
+            this.killswitch_enabled = false;
+        }
+    }
+
+    toggle_killswitch() {
+        try {
+            if (this.killswitch_enabled) {
+                // Disable kill switch
+                Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-killswitch.sh', 'disable'], 
+                    Gio.SubprocessFlags.NONE);
+                
+                Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
+                    this.update_status();
+                    this._buildMenu();
+                    return false;
+                }));
+            } else {
+                // Enable kill switch
+                Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-killswitch.sh', 'enable'], 
+                    Gio.SubprocessFlags.NONE);
+                
+                Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
+                    this.update_status();
+                    this._buildMenu();
+                    return false;
+                }));
+            }
+        } catch(e) {
+            this.logError("Failed to toggle kill switch", e);
         }
     }
     
@@ -506,6 +587,15 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 }
             }
             
+            // Update kill switch status
+            if (this.killswitch_item) {
+                if (this.killswitch_enabled) {
+                    this.killswitch_item.label.set_text("🛡️ Kill Switch: ON");
+                } else {
+                    this.killswitch_item.label.set_text("Kill Switch: OFF");
+                }
+            }
+
             if (this.region_item) {
                 this.region_item.label.set_text(
                     "Region: " + (this.current_region_name || "Unknown")
@@ -532,9 +622,22 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     
     on_quick_disconnect() {
         try {
+            // Store kill switch state BEFORE disabling (for later re-enabling)
+            if (this.killswitch_enabled) {
+                // Create a marker file to remember kill switch was on
+                Gio.Subprocess.new(['sudo', '-n', 'touch', '/var/lib/pia/killswitch-was-enabled'], 
+                    Gio.SubprocessFlags.NONE);
+            }
+            
             // Pause watchdog before disconnecting
             Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-watchdog.sh', 'pause'], 
                 Gio.SubprocessFlags.NONE);
+            
+            // Disable kill switch if enabled (so we can reconnect later)
+            if (this.killswitch_enabled) {
+                Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-killswitch.sh', 'disable'], 
+                    Gio.SubprocessFlags.NONE);
+            }
             
             // Stop port forwarding first
             Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'stop', 'pia-port-forward.service'], 
@@ -559,16 +662,136 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'restart', 'pia-vpn.service'], 
                 Gio.SubprocessFlags.NONE);
             
-            // Resume watchdog after reconnecting
-            Mainloop.timeout_add_seconds(6, Lang.bind(this, () => {
+            // Wait for VPN to connect, then resume watchdog and re-enable kill switch
+            Mainloop.timeout_add_seconds(10, Lang.bind(this, () => {
+                global.log("[PIA VPN Applet] Reconnect: checking for marker file");
+                
+                // Resume watchdog
                 Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-watchdog.sh', 'resume'], 
                     Gio.SubprocessFlags.NONE);
+                
+                // Check if kill switch should be re-enabled
+                try {
+                    let file = Gio.file_new_for_path('/var/lib/pia/killswitch-was-enabled');
+                    let exists = file.query_exists(null);
+                    
+                    global.log("[PIA VPN Applet] Marker file exists: " + exists);
+                    
+                    if (exists) {
+                        global.log("[PIA VPN Applet] Re-enabling kill switch after reconnect");
+                        
+                        // Helper function to check if VPN interface exists
+                        let tryEnableKillswitch = (attempt) => {
+                            if (exists) {
+                                global.log("[PIA VPN Applet] Re-enabling kill switch after reconnect");
+                                
+                                // Start trying to enable kill switch after 2 seconds
+                                Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
+                                    this._enableKillswitchWhenReady(1);
+                                    return false;
+                                }));
+                            }
+                            
+                            // Check if VPN interface exists
+                            let [iface_success] = GLib.spawn_command_line_sync('ip link show pia');
+                            
+                            if (!iface_success) {
+                                global.log("[PIA VPN Applet] VPN interface not ready, attempt " + attempt + "/5, retrying in 3s...");
+                                Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
+                                    tryEnableKillswitch(attempt + 1);
+                                    return false;
+                                }));
+                                return;
+                            }
+                            
+                            global.log("[PIA VPN Applet] VPN interface ready, enabling kill switch...");
+                            
+                            // Re-enable kill switch
+                            let [success, stdout, stderr, exit_code] = GLib.spawn_command_line_sync(
+                                'sudo -n /usr/local/bin/pia-killswitch.sh enable'
+                            );
+                            
+                            let actual_exit = exit_code / 256;
+                            
+                            if (actual_exit === 0) {
+                                global.log("[PIA VPN Applet] ✓ Kill switch successfully re-enabled");
+                                GLib.spawn_command_line_sync('sudo -n rm -f /var/lib/pia/killswitch-was-enabled');
+                                this.update_status();
+                            } else {
+                                global.log("[PIA VPN Applet] Kill switch failed (exit " + actual_exit + "), retrying...");
+                                if (stderr && stderr.length > 0) {
+                                    global.log("[PIA VPN Applet] stderr: " + imports.byteArray.toString(stderr));
+                                }
+                                // Retry
+                                Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
+                                    tryEnableKillswitch(attempt + 1);
+                                    return false;
+                                }));
+                            }
+                        };
+                        
+                        // Start trying to enable kill switch after 2 seconds
+                        Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
+                            tryEnableKillswitch(1);
+                            return false;
+                        }));
+                    } else {
+                        global.log("[PIA VPN Applet] No marker file, not re-enabling kill switch");
+                    }
+                } catch(e) {
+                    this.logError("Error checking killswitch marker", e);
+                }
                 
                 this.update_status();
                 return false;
             }));
         } catch(e) {
             this.logError("Failed to reconnect VPN", e);
+        }
+    }
+
+    _enableKillswitchWhenReady(attempt) {
+        if (attempt > 5) {
+            global.log("[PIA VPN Applet] Failed to enable kill switch after 5 attempts");
+            GLib.spawn_command_line_sync('sudo -n rm -f /var/lib/pia/killswitch-was-enabled');
+            return;
+        }
+        
+        // Check if VPN interface exists
+        let [iface_success] = GLib.spawn_command_line_sync('ip link show pia');
+        
+        if (!iface_success) {
+            global.log("[PIA VPN Applet] VPN interface not ready, attempt " + attempt + "/5, retrying in 3s...");
+            Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
+                this._enableKillswitchWhenReady(attempt + 1);
+                return false;
+            }));
+            return;
+        }
+        
+        global.log("[PIA VPN Applet] VPN interface ready, enabling kill switch...");
+        
+        // Re-enable kill switch
+        let [success, stdout, stderr, exit_code] = GLib.spawn_command_line_sync(
+            'sudo -n /usr/local/bin/pia-killswitch.sh enable'
+        );
+        
+        let actual_exit = exit_code / 256;
+        
+        if (actual_exit === 0) {
+            global.log("[PIA VPN Applet] ✓ Kill switch successfully re-enabled");
+            GLib.spawn_command_line_sync('sudo -n rm -f /var/lib/pia/killswitch-was-enabled');
+            this.update_status();
+        } else {
+            global.log("[PIA VPN Applet] Kill switch failed (exit " + actual_exit + "), retrying...");
+            if (stderr && stderr.length > 0) {
+                global.log("[PIA VPN Applet] stderr: " + imports.byteArray.toString(stderr));
+            }
+            // Retry
+            Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
+                this._enableKillswitchWhenReady(attempt + 1);
+                return false;
+            }));
         }
     }
     
@@ -638,6 +861,21 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     
     on_check_servers() {
         try {
+            // Store kill switch state BEFORE disabling
+            if (this.killswitch_enabled) {
+                GLib.spawn_command_line_sync('sudo -n touch /var/lib/pia/killswitch-was-enabled');
+            }
+            
+            // Pause watchdog
+            Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-watchdog.sh', 'pause'], 
+                Gio.SubprocessFlags.NONE);
+            
+            // Disable kill switch if enabled
+            if (this.killswitch_enabled) {
+                Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-killswitch.sh', 'disable'], 
+                    Gio.SubprocessFlags.NONE);
+            }
+            
             let pattern = "s/^AUTOCONNECT=.*/AUTOCONNECT=true/";
             
             let proc = Gio.Subprocess.new(
@@ -655,7 +893,18 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                             Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'restart', 'pia-vpn.service'], 
                                 Gio.SubprocessFlags.NONE);
                             
-                            Mainloop.timeout_add_seconds(5, Lang.bind(this, () => {
+                            // Use the same reconnect logic
+                            Mainloop.timeout_add_seconds(10, Lang.bind(this, () => {
+                                // Resume watchdog
+                                Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-watchdog.sh', 'resume'], 
+                                    Gio.SubprocessFlags.NONE);
+                                
+                                // Check if kill switch should be re-enabled
+                                let file = Gio.file_new_for_path('/var/lib/pia/killswitch-was-enabled');
+                                if (file.query_exists(null)) {
+                                    this._enableKillswitchWhenReady(1);
+                                }
+                                
                                 this.update_status();
                                 this._buildMenu();
                                 return false;

@@ -33,15 +33,30 @@ Cmnd_Alias PIA_WG = /usr/bin/wg-quick up pia, \
 Cmnd_Alias PIA_EDITOR = /usr/bin/xed /etc/pia-credentials
 Cmnd_Alias PIA_CHMOD = /bin/chmod 644 /etc/pia-credentials, \
                        /bin/chmod 640 /etc/pia-credentials
+
+# Allow sudo group to run these specific PIA commands without password
+%sudo ALL=(ALL) NOPASSWD: PIA_SED, PIA_SYSTEMCTL_START, PIA_SYSTEMCTL_STOP, \
+                          PIA_SYSTEMCTL_RESTART, PIA_SYSTEMCTL_STATUS, \
+                          PIA_WG, PIA_EDITOR, PIA_CHMOD
+
 Cmnd_Alias PIA_WATCHDOG = /usr/local/bin/pia-watchdog.sh pause, \
                           /usr/local/bin/pia-watchdog.sh resume, \
                           /usr/local/bin/pia-watchdog.sh status, \
                           /usr/local/bin/pia-watchdog.sh check
 
-# Allow sudo group to run these specific PIA commands without password
+Cmnd_Alias PIA_KILLSWITCH = /usr/local/bin/pia-killswitch.sh enable, \
+                            /usr/local/bin/pia-killswitch.sh disable, \
+                            /usr/local/bin/pia-killswitch.sh status
+
+Cmnd_Alias NFT_LIST = /usr/sbin/nft list tables
+
+Cmnd_Alias PIA_MARKER = /usr/bin/touch /var/lib/pia/killswitch-was-enabled, \
+                        /bin/rm -f /var/lib/pia/killswitch-was-enabled
+
 %sudo ALL=(ALL) NOPASSWD: PIA_SED, PIA_SYSTEMCTL_START, PIA_SYSTEMCTL_STOP, \
                           PIA_SYSTEMCTL_RESTART, PIA_SYSTEMCTL_STATUS, \
-                          PIA_WG, PIA_EDITOR, PIA_CHMOD, PIA_WATCHDOG
+                          PIA_WG, PIA_EDITOR, PIA_CHMOD, PIA_WATCHDOG, \
+                          PIA_KILLSWITCH, NFT_LIST, PIA_MARKER
 SUDOERS_EOF
 
 # Validate syntax
