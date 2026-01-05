@@ -109,8 +109,19 @@ health_check() {
 }
 
 # Attempt to recover VPN
+# Attempt to recover VPN
 recover_vpn() {
     log "Attempting VPN recovery..."
+    
+    # Check if kill switch is enabled
+    local killswitch_was_on=false
+    if nft list table inet pia_killswitch &>/dev/null; then
+        log "Kill switch is on, temporarily disabling for reconnect..."
+        killswitch_was_on=true
+        /usr/local/bin/pia-killswitch.sh disable
+        touch "$PERSIST_DIR/killswitch-was-enabled-watchdog"
+        sleep 2
+    fi
     
     # Stop port forwarding first
     systemctl stop pia-port-forward.service 2>/dev/null || true
@@ -133,6 +144,19 @@ recover_vpn() {
                 
                 if check_connectivity && check_internet; then
                     log "✓ VPN connectivity restored"
+                    
+                    # Re-enable kill switch if it was on
+                    if [ "$killswitch_was_on" = true ]; then
+                        log "Re-enabling kill switch..."
+                        # Wait for VPN to be fully stable
+                        sleep 2
+                        if /usr/local/bin/pia-killswitch.sh enable; then
+                            log "✓ Kill switch re-enabled"
+                            rm -f "$PERSIST_DIR/killswitch-was-enabled-watchdog"
+                        else
+                            log "⚠️ Failed to re-enable kill switch, will retry"
+                        fi
+                    fi
                     
                     # Reset failure count
                     FAILURE_COUNT=0
