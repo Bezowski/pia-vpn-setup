@@ -114,7 +114,7 @@ TAILSCALE_PREDOWN=""
 if ip link show tailscale0 &>/dev/null; then
   echo "Tailscale detected, adding route preservation..."
   TAILSCALE_POSTUP="PostUp = ip route add 100.64.0.0/10 dev tailscale0"
-  TAILSCALE_PREDOWN="PreDown = ip route del 100.64.0.0/10 dev tailscale0 2>/dev/null || true"
+  TAILSCALE_PREDOWN="PreDown = ip route del 100.64.0.0/10 dev tailscale0 || true"
 else
   echo "Tailscale not detected, skipping Tailscale routes"
 fi
