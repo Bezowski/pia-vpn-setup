@@ -16,7 +16,7 @@ Automated PIA VPN setup with WireGuard, port forwarding, and systemd integration
 * ✅ Automatic log rotation (prevents unbounded growth)
 * ✅ Lightweight (no official GUI client needed)
 
-<img width="260" height="486" alt="PIA-Cinnamon-applet3" src="https://github.com/user-attachments/assets/f4df6c9c-38b0-4f19-8370-ac527c1c2e2e" />
+<img width="250" height="485" alt="PIA-Cinnamon-applet4" src="https://github.com/user-attachments/assets/4214ed9e-1b36-4d1d-ba12-95a0cba1abd7" />
 
 ## Security Features
 
