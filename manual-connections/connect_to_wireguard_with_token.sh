@@ -107,6 +107,18 @@ if [[ $PIA_DNS == "true" ]]; then
   dnsSettingForVPN="DNS = $dnsServer"
 fi
 
+# FIXED: Add PostUp commands only if Tailscale is actually running
+TAILSCALE_POSTUP=""
+TAILSCALE_PREDOWN=""
+
+if ip link show tailscale0 &>/dev/null; then
+  echo "Tailscale detected, adding route preservation..."
+  TAILSCALE_POSTUP="PostUp = ip route add 100.64.0.0/10 dev tailscale0"
+  TAILSCALE_PREDOWN="PreDown = ip route del 100.64.0.0/10 dev tailscale0 2>/dev/null || true"
+else
+  echo "Tailscale not detected, skipping Tailscale routes"
+fi
+
 echo -n "Trying to write ${PIA_CONF_PATH}..."
 mkdir -p "$(dirname "$PIA_CONF_PATH")"
 echo "
@@ -114,6 +126,8 @@ echo "
 Address = $(echo "$wireguard_json" | jq -r '.peer_ip')
 PrivateKey = $privKey
 $dnsSettingForVPN
+$TAILSCALE_POSTUP
+$TAILSCALE_PREDOWN
 [Peer]
 PersistentKeepalive = 25
 PublicKey = $(echo "$wireguard_json" | jq -r '.server_key')

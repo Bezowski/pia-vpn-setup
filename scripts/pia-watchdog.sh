@@ -109,7 +109,6 @@ health_check() {
 }
 
 # Attempt to recover VPN
-# Attempt to recover VPN
 recover_vpn() {
     log "Attempting VPN recovery..."
     
