@@ -19,7 +19,7 @@ log_metric() {
 
 # Helper function: Wait for network to be ready
 wait_for_network() {
-  local max_wait=30
+  local max_wait=60  # New - Increased from 30s - network can be slow after resume
   local wait_count=0
   
   echo "Waiting for network to be ready..."
