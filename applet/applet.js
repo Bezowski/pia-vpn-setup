@@ -477,23 +477,44 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 let [success, contents] = file.load_contents(null);
                 if (success) {
                     let text = imports.byteArray.toString(contents);
-                    let match = text.match(/hostname=([^\s\n]+)/);
                     
-                    if (match) {
-                        let hostname = match[1].trim();
-                        this.log("Found hostname: " + hostname);
+                    // Try to read region_id first (most reliable method)
+                    let region_match = text.match(/region_id=([^\s\n]+)/);
+                    if (region_match) {
+                        let region_id = region_match[1].trim();
+                        this.log("Found region_id: " + region_id);
+                        
+                        // Look up the region name from servers data
+                        if (this.servers_data && this.servers_data.regions) {
+                            for (let i = 0; i < this.servers_data.regions.length; i++) {
+                                let region = this.servers_data.regions[i];
+                                if (region.id === region_id) {
+                                    this.current_region_name = region.name;
+                                    this.log("Matched region_id to: " + region.name);
+                                    return;
+                                }
+                            }
+                            this.log("region_id '" + region_id + "' not found in servers list");
+                        }
+                    }
+                    
+                    // Fallback: Try hostname matching (for backwards compatibility)
+                    let hostname_match = text.match(/hostname=([^\s\n]+)/);
+                    if (hostname_match) {
+                        let hostname = hostname_match[1].trim();
+                        this.log("Falling back to hostname matching: " + hostname);
                         
                         if (!this.servers_data || !this.servers_data.regions) {
                             this.log("No servers data available");
-                            this.current_region_name = hostname; // Fallback to hostname
+                            this.current_region_name = hostname;
                             return;
                         }
                         
-                        // Extract base name (e.g., "sydney428" -> "sydney", "melbourne433" -> "melbourne")
+                        // Extract base name (e.g., "sydney428" -> "sydney")
                         let basename = hostname.replace(/[0-9]+$/, '').toLowerCase();
                         this.log("Extracted basename: " + basename);
                         
-                        // Try exact match first
+                        // Try exact hostname match first
                         for (let i = 0; i < this.servers_data.regions.length; i++) {
                             let region = this.servers_data.regions[i];
                             for (let protocol in region.servers) {
@@ -502,6 +523,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                                     for (let j = 0; j < servers.length; j++) {
                                         if (servers[j].cn === hostname) {
                                             this.current_region_name = region.name;
+                                            this.log("Matched hostname exactly to: " + region.name);
                                             return;
                                         }
                                     }
@@ -515,17 +537,17 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                             let region_name_lower = region.name.toLowerCase();
                             let region_id_lower = region.id.toLowerCase();
                             
-                            // Check if region name or ID contains the basename
                             if (region_name_lower.includes(basename) || 
                                 basename.includes(region_id_lower) || 
                                 region_id_lower.includes(basename)) {
                                 this.current_region_name = region.name;
+                                this.log("Matched basename to: " + region.name);
                                 return;
                             }
                         }
                         
                         // Last resort: use the hostname itself
-                        this.log("No region match found, using hostname");
+                        this.log("No region match found, using hostname: " + hostname);
                         this.current_region_name = hostname;
                         return;
                     }

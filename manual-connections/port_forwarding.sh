@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Patched port_forwarding.sh with graceful handling for non-PF servers
-# FIXED: Port file now written on every bind cycle, not just once
+# Enhanced port_forwarding.sh with payload/signature persistence
+# Keeps same port across reboots (until signature expires after ~2 months)
 set -euo pipefail
 
 # Simple tool checks
@@ -46,6 +46,8 @@ PERSIST_DIR=/var/lib/pia
 mkdir -p "$PERSIST_DIR"
 TOKEN_FILE="$PERSIST_DIR/token.txt"
 PORT_FILE="$PERSIST_DIR/forwarded_port"
+PAYLOAD_FILE="$PERSIST_DIR/payload.txt"
+SIGNATURE_FILE="$PERSIST_DIR/signature.txt"
 
 # Reuse persisted token if present
 if [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ]; then
@@ -78,7 +80,7 @@ if [[ -t 1 ]]; then
   fi
 fi
 
-# Ensure color vars are always defined (avoid unbound variable with set -u)
+# Ensure color vars are always defined
 red=${red:-}
 green=${green:-}
 nc=${nc:-}
@@ -89,8 +91,6 @@ write_port_file() {
   local expires_at=$2
   
   # Strip nanoseconds from ISO8601 format if present
-  # Input: "2026-02-25T18:02:41.37845301Z"
-  # Output: "2026-02-25T18:02:41Z"
   local expires_at_clean="${expires_at%.*}Z"
   
   local EXPIRY_UNIX
@@ -110,67 +110,176 @@ write_port_file() {
   echo "✓ Port file written: $PORT_FILE (port=$port, expiry=$(/bin/date -d @"$EXPIRY_UNIX" --iso-8601=seconds))"
 }
 
-# If a saved port exists and is still valid, prefer reusing it.
-if [ -f "$PORT_FILE" ]; then
-  read SAVED_PORT SAVED_EXPIRY < "$PORT_FILE" || true
-  if [ -n "$SAVED_PORT" ] && [ -n "$SAVED_EXPIRY" ] && [ "$SAVED_EXPIRY" -gt "$(/bin/date +%s)" ]; then
-    port="$SAVED_PORT"
-    echo -e "Reusing saved forwarded port ${green}$port${nc} (expires $(/bin/date -d @"$SAVED_EXPIRY" --iso-8601=seconds))"
-    # We'll still request payload/signature below to ensure validity.
-  fi
-fi
-
-# Get payload and signature from PF API (or use PAYLOAD_AND_SIGNATURE env var).
-if [ -z "${PAYLOAD_AND_SIGNATURE:-}" ]; then
-  echo
-  echo -n "Getting new signature... "
+# Helper function to save payload and signature atomically
+save_signature() {
+  local payload=$1
+  local signature=$2
   
-  # Try to get signature, but handle non-PF servers gracefully
+  local tmp_payload tmp_signature
+  tmp_payload="$(/bin/mktemp "${PAYLOAD_FILE}.XXXX")"
+  tmp_signature="$(/bin/mktemp "${SIGNATURE_FILE}.XXXX")"
+  
+  echo "$payload" > "$tmp_payload"
+  echo "$signature" > "$tmp_signature"
+  
+  /bin/chmod 0644 "$tmp_payload" "$tmp_signature"
+  /bin/mv -f "$tmp_payload" "$PAYLOAD_FILE"
+  /bin/mv -f "$tmp_signature" "$SIGNATURE_FILE"
+  
+  echo "✓ Payload and signature persisted to disk"
+}
+
+# Helper function to check if saved signature is still valid
+check_saved_signature() {
+  if [ ! -f "$PAYLOAD_FILE" ] || [ ! -f "$SIGNATURE_FILE" ]; then
+    return 1  # No saved signature
+  fi
+  
+  echo "Found saved signature, checking validity..."
+  
+  local saved_payload saved_signature
+  saved_payload=$(cat "$PAYLOAD_FILE" 2>/dev/null || echo "")
+  saved_signature=$(cat "$SIGNATURE_FILE" 2>/dev/null || echo "")
+  
+  if [ -z "$saved_payload" ] || [ -z "$saved_signature" ]; then
+    echo "Saved files are empty"
+    return 1
+  fi
+  
+  # Decode payload to check expiry and creation time
+  local decoded
+  if ! decoded=$(echo "$saved_payload" | /usr/bin/base64 -d 2>/dev/null); then
+    echo "Failed to decode saved payload"
+    rm -f "$PAYLOAD_FILE" "$SIGNATURE_FILE"
+    return 1
+  fi
+  
+  local expires_at created_at saved_port
+  expires_at=$(echo "$decoded" | /usr/bin/jq -r '.expires_at // empty' 2>/dev/null)
+  created_at=$(echo "$decoded" | /usr/bin/jq -r '.created_at // empty' 2>/dev/null)
+  saved_port=$(echo "$decoded" | /usr/bin/jq -r '.port // empty' 2>/dev/null)
+  
+  if [ -z "$expires_at" ] || [ -z "$saved_port" ]; then
+    echo "Saved payload missing required fields"
+    rm -f "$PAYLOAD_FILE" "$SIGNATURE_FILE"
+    return 1
+  fi
+  
+  # Check expiry (port expires after ~2 months)
+  local expiry_unix current_unix
+  expiry_unix=$(/bin/date -d "$expires_at" +%s 2>/dev/null || echo 0)
+  current_unix=$(/bin/date +%s)
+  
+  if [ "$expiry_unix" -le "$current_unix" ]; then
+    echo "Saved signature expired on $(/bin/date -d @$expiry_unix)"
+    rm -f "$PAYLOAD_FILE" "$SIGNATURE_FILE"
+    return 1
+  fi
+  
+  # Check age of signature (PIA might reject if too old, even if not expired)
+  # Be conservative: only reuse if less than 2 hours old
+  if [ -n "$created_at" ]; then
+    local created_unix age_seconds age_hours
+    created_unix=$(/bin/date -d "$created_at" +%s 2>/dev/null || echo 0)
+    
+    if [ "$created_unix" -gt 0 ]; then
+      age_seconds=$((current_unix - created_unix))
+      age_hours=$((age_seconds / 3600))
+      
+      # Only reuse if signature is fresh (< 2 hours old)
+      # This handles suspend/resume where time jumps forward
+      if [ "$age_hours" -ge 2 ]; then
+        echo "Saved signature is $age_hours hours old (too stale, getting fresh one)"
+        echo "Note: Signatures older than ~2 hours may be rejected by PIA"
+        rm -f "$PAYLOAD_FILE" "$SIGNATURE_FILE"
+        return 1
+      fi
+      
+      echo "Signature age: $age_hours hours (fresh enough to reuse)"
+    fi
+  fi
+  
+  # Calculate time remaining until expiry
+  local time_remaining days_remaining hours_remaining
+  time_remaining=$((expiry_unix - current_unix))
+  days_remaining=$((time_remaining / 86400))
+  hours_remaining=$(((time_remaining % 86400) / 3600))
+  
+  echo -e "${green}✓ Saved signature is valid${nc}"
+  echo "  Port: $saved_port"
+  echo "  Expires in: $days_remaining days, $hours_remaining hours"
+  echo "  Expiry date: $(/bin/date -d @$expiry_unix)"
+  
+  # Export for use in main script
+  export SAVED_PAYLOAD="$saved_payload"
+  export SAVED_SIGNATURE="$saved_signature"
+  export SAVED_PORT="$saved_port"
+  export SAVED_EXPIRES_AT="$expires_at"
+  
+  return 0
+}
+
+# Try to reuse existing signature
+REUSING_SIGNATURE=false
+
+if check_saved_signature; then
+  # Use saved signature
+  payload="$SAVED_PAYLOAD"
+  signature="$SAVED_SIGNATURE"
+  port="$SAVED_PORT"
+  expires_at="$SAVED_EXPIRES_AT"
+  REUSING_SIGNATURE=true
+  
+  echo -e "\n${green}==> Reusing saved port $port${nc}\n"
+else
+  # Need to get new signature
+  echo -e "\n==> Getting new signature from PIA...\n"
+  
+  # Get payload and signature from PF API
+  echo -n "Requesting signature... "
+  
   if ! payload_and_signature="$(retry 5 2 /usr/bin/curl -s -m 5 \
     --connect-to "${PF_HOSTNAME}::${PF_GATEWAY}:" \
     --cacert "ca.rsa.4096.crt" \
     -G --data-urlencode "token=${PIA_TOKEN}" \
     "https://${PF_HOSTNAME}:19999/getSignature")"; then
     
-    # Connection failed - likely non-PF server
     >&2 echo -e "${red}Failed to get signature after retries.${nc}"
     >&2 echo "This server may not support port forwarding."
     >&2 echo "Port forwarding is disabled on US servers and some other regions."
-    exit 0  # Exit cleanly (0) instead of failing (1) so service doesn't restart
-  fi
-else
-  payload_and_signature=$PAYLOAD_AND_SIGNATURE
-  echo -n "Checking the payload_and_signature from the env var... "
-fi
-export payload_and_signature
-
-if [ "$(/usr/bin/jq -r '.status' <<<"$payload_and_signature")" != "OK" ]; then
-  >&2 echo -e "${red}The payload_and_signature variable does not contain an OK status.${nc}"
-  
-  # Check if this is a non-PF server error
-  ERROR_MSG=$(/usr/bin/jq -r '.message // empty' <<<"$payload_and_signature")
-  if [ -n "$ERROR_MSG" ]; then
-    >&2 echo "Error: $ERROR_MSG"
+    exit 0
   fi
   
-  >&2 echo "This server may not support port forwarding."
-  exit 0  # Exit cleanly (0) so service doesn't restart endlessly
+  export payload_and_signature
+  
+  if [ "$(/usr/bin/jq -r '.status' <<<"$payload_and_signature")" != "OK" ]; then
+    >&2 echo -e "${red}The payload_and_signature does not contain an OK status.${nc}"
+    
+    ERROR_MSG=$(/usr/bin/jq -r '.message // empty' <<<"$payload_and_signature")
+    if [ -n "$ERROR_MSG" ]; then
+      >&2 echo "Error: $ERROR_MSG"
+    fi
+    
+    >&2 echo "This server may not support port forwarding."
+    exit 0
+  fi
+  
+  echo -e "${green}OK!${nc}"
+  
+  signature=$(/usr/bin/jq -r '.signature' <<<"$payload_and_signature")
+  payload=$(/usr/bin/jq -r '.payload' <<<"$payload_and_signature")
+  
+  # Extract port and expiry from new signature
+  port=$(/bin/base64 -d <<<"$payload" | /usr/bin/jq -r '.port')
+  expires_at=$(/bin/base64 -d <<<"$payload" | /usr/bin/jq -r '.expires_at')
+  
+  # Save the new signature for future use
+  save_signature "$payload" "$signature"
+  
+  echo -e "\n${green}==> Got new port $port${nc}\n"
 fi
-echo -e "${green}OK!${nc}"
 
-signature=$(/usr/bin/jq -r '.signature' <<<"$payload_and_signature")
-payload=$(/usr/bin/jq -r '.payload' <<<"$payload_and_signature")
-# extract port and expiry
-new_port=$(/bin/base64 -d <<<"$payload" | /usr/bin/jq -r '.port')
-expires_at=$(/bin/base64 -d <<<"$payload" | /usr/bin/jq -r '.expires_at')
-
-# Prefer port from saved state if present (over new_port) so we keep a stable port.
-if [ -n "${port:-}" ]; then
-  :
-else
-  port="$new_port"
-fi
-
+# Display signature info
 echo -ne "
 Signature ${green}$signature${nc}
 Payload   ${green}$payload${nc}
@@ -190,7 +299,7 @@ fi
 # Write the port file for the FIRST time (before entering loop)
 write_port_file "$port" "$expires_at"
 
-# Update firewall immediately after getting new port
+# Update firewall immediately after getting port
 /usr/local/bin/pia-firewall-update-wrapper.sh || true
 
 # Bind and keepalive loop
@@ -212,11 +321,13 @@ while true; do
   if [ "$(/usr/bin/jq -r '.status' <<<"$bind_port_response")" != "OK" ]; then
     >&2 echo -e "${red}The API did not return OK when trying to bind port... Exiting.${nc}"
     >&2 echo "Response: $bind_port_response"
+    
+    # If bind fails, signature might be stale - delete saved files
+    rm -f "$PAYLOAD_FILE" "$SIGNATURE_FILE"
     exit 1
   fi
 
-  # CRITICAL FIX: Write port file on EVERY successful bind
-  # This ensures the file always exists and is up-to-date
+  # CRITICAL: Write port file on EVERY successful bind
   write_port_file "$port" "$expires_at"
 
   echo -e Forwarded port'\t'"${green}$port${nc}"
@@ -224,6 +335,11 @@ while true; do
   if [ -n "${expires_at:-}" ]; then
     echo -e Expires on'\t'"${red}$(/bin/date --date="$expires_at")${nc}"
   fi
+  
+  if [ "$REUSING_SIGNATURE" = true ]; then
+    echo -e Status'\t\t'"${green}Reusing saved signature${nc}"
+  fi
+  
   echo -e "\n${green}This script will need to remain active to use port forwarding, and will refresh every 15 minutes.${nc}\n"
 
   # sleep 15 minutes

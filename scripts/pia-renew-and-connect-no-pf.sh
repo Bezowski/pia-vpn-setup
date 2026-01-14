@@ -119,6 +119,7 @@ chmod 0755 "$PERSIST_DIR"
 TMP="$PERSIST_DIR/region.txt.tmp"
 HOSTNAME=""
 GATEWAY=""
+REGION_ID=""
 
 if [ -f /etc/wireguard/pia.conf ]; then
   GATEWAY=$(grep "^Endpoint" /etc/wireguard/pia.conf 2>/dev/null | awk '{print $3}' | cut -d: -f1 || true)
@@ -128,7 +129,43 @@ if [ -n "${WG_HOSTNAME:-}" ]; then
   HOSTNAME="$WG_HOSTNAME"
 fi
 
-printf 'hostname=%s\ngateway=%s\n' "${HOSTNAME:-}" "${GATEWAY:-}" > "$TMP"
+# Determine the actual region ID
+if [ "$AUTOCONNECT" != "true" ] && [ "$PREFERRED_REGION" != "none" ]; then
+  # Manual selection - use what was set
+  REGION_ID="$PREFERRED_REGION"
+  echo "Using manually selected region: $REGION_ID"
+else
+  # Autoconnect or need to look up region from gateway IP
+  if [ -n "$GATEWAY" ]; then
+    echo "Looking up region from gateway IP: $GATEWAY"
+    
+    # Get server list (only first line, which contains all the JSON)
+    SERVER_LIST=$(curl -s "https://serverlist.piaservers.net/vpninfo/servers/v7" 2>/dev/null | head -1)
+    
+    if [ -n "$SERVER_LIST" ]; then
+      # Look up region by gateway IP
+      REGION_ID=$(echo "$SERVER_LIST" | \
+        jq -r --arg ip "$GATEWAY" \
+        '.regions[] | select(.servers.wg[]?.ip == $ip) | .id' 2>/dev/null | head -1)
+      
+      if [ -n "$REGION_ID" ] && [ "$REGION_ID" != "null" ]; then
+        echo "✓ Matched gateway to region: $REGION_ID"
+      else
+        # Fallback to PREFERRED_REGION if lookup fails
+        REGION_ID="$PREFERRED_REGION"
+        echo "Could not match gateway, using PREFERRED_REGION: $REGION_ID"
+      fi
+    else
+      REGION_ID="$PREFERRED_REGION"
+      echo "Failed to fetch server list, using PREFERRED_REGION: $REGION_ID"
+    fi
+  else
+    REGION_ID="$PREFERRED_REGION"
+    echo "No gateway found, using PREFERRED_REGION: $REGION_ID"
+  fi
+fi
+
+printf 'hostname=%s\ngateway=%s\nregion_id=%s\n' "${HOSTNAME:-}" "${GATEWAY:-}" "${REGION_ID:-}" > "$TMP"
 chmod 0600 "$TMP"
 mv -f "$TMP" "$PERSIST_DIR/region.txt"
 chmod 644 "$PERSIST_DIR/region.txt"

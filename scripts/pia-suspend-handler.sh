@@ -19,15 +19,22 @@ log_metric() {
 
 # Helper function: Wait for network to be ready
 wait_for_network() {
-  local max_wait=60  # New - Increased from 30s - network can be slow after resume
+  local max_wait=${1:-30}
   local wait_count=0
   
   echo "Waiting for network to be ready..."
   
   while [ $wait_count -lt $max_wait ]; do
-    # Check if we can reach a DNS server
+    # Try multiple methods to detect network
+    # Method 1: Can we reach a DNS server?
     if timeout 2 bash -c 'echo > /dev/tcp/1.1.1.1/53' 2>/dev/null; then
       echo "✓ Network is ready (after ${wait_count}s)"
+      return 0
+    fi
+    
+    # Method 2: Check if any network interface (other than lo) has an IP
+    if ip addr show | grep -q "inet.*scope global"; then
+      echo "✓ Network interface has IP (after ${wait_count}s)"
       return 0
     fi
     
@@ -36,7 +43,7 @@ wait_for_network() {
   done
   
   echo "⚠️ Network not ready after ${max_wait}s, continuing anyway..."
-  return 1
+  return 1  # Don't fail - just continue
 }
 
 # Helper function: Wait for VPN interface to be ready with IP
@@ -170,54 +177,13 @@ reconnect_vpn() {
   }
   sleep 2
   
-  # Step 2: Restart the VPN service
-  echo "Step 2: Restarting pia-vpn.service for fresh connection..."
-  systemctl restart pia-vpn.service || {
-    echo "✗ Failed to restart VPN service"
-    return 1
-  }
+  # Step 2: Start the VPN service (non-blocking)
+  echo "Step 2: Starting pia-vpn.service (non-blocking)..."
+  systemctl start pia-vpn.service --no-block
   
-  # Step 3: Wait for VPN to connect
-  echo "Step 3: Waiting for VPN connection..."
-  if wait_for_vpn_interface; then
-    echo "✓ VPN interface reconnected"
-    
-    # Step 4: Test connectivity
-    echo "Step 4: Testing connectivity..."
-    if test_vpn_connectivity; then
-      echo "✓ VPN connectivity verified"
-      
-      # Step 5: Handle port forwarding
-      echo "Step 5: Checking port forwarding..."
-      CRED_FILE="/etc/pia-credentials"
-      PIA_PF_SETTING="false"
-      
-      if [ -f "$CRED_FILE" ]; then
-        source "$CRED_FILE"
-        PIA_PF_SETTING=${PIA_PF:-"false"}
-      fi
-      
-      if [ "$PIA_PF_SETTING" = "true" ]; then
-        echo "  Port forwarding enabled, restarting service..."
-        if restart_port_forwarding; then
-          echo "✅ VPN and port forwarding fully restored"
-        else
-          echo "⚠️ VPN reconnected but port forwarding delayed"
-        fi
-      else
-        echo "  Port forwarding disabled in config"
-        echo "✅ VPN reconnected (port forwarding disabled)"
-      fi
-      
-      return 0
-    else
-      echo "✗ VPN reconnected but connectivity test failed"
-      return 1
-    fi
-  else
-    echo "✗ Failed to reconnect VPN after resume"
-    return 1
-  fi
+  echo "✓ VPN service started in background"
+  echo "  (Service will complete connection and restart port forwarding automatically)"
+  return 0
 }
 
 # Main logic
