@@ -113,6 +113,58 @@ REGION_OUTPUT=$(./get_region.sh 2>&1)
 echo "$REGION_OUTPUT"
 export WG_HOSTNAME=$(echo "$REGION_OUTPUT" | grep -oP 'WG_HOSTNAME=\K[^ \\]+' | head -1)
 
+# Function to get server list (with caching)
+get_server_list() {
+    local CACHE_FILE="$PERSIST_DIR/server-list-cache.json"
+    local CACHE_MAX_AGE=86400  # 24 hours
+    local now=$(date +%s)
+    
+    # Check if cache exists and is fresh
+    if [ -f "$CACHE_FILE" ]; then
+        local cache_mtime=$(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0)
+        local cache_age=$((now - cache_mtime))
+        
+        if [ "$cache_age" -lt "$CACHE_MAX_AGE" ]; then
+            echo "Using cached server list (age: ${cache_age}s)" >&2
+            cat "$CACHE_FILE"
+            return 0
+        else
+            echo "Cache expired (age: ${cache_age}s), fetching fresh list..." >&2
+        fi
+    else
+        echo "No cache found, fetching server list..." >&2
+    fi
+    
+    # Fetch fresh list with timeout
+    local server_list=$(timeout 10 curl -s --max-time 5 \
+        "https://serverlist.piaservers.net/vpninfo/servers/v7" 2>/dev/null | head -1)
+    
+    if [ -n "$server_list" ] && [ ${#server_list} -gt 1000 ]; then
+        # Valid response (should be large JSON)
+        echo "✓ Fetched fresh server list (${#server_list} bytes)" >&2
+        
+        # Save to cache atomically
+        local tmp_cache=$(mktemp "${CACHE_FILE}.XXXX" 2>/dev/null || echo "${CACHE_FILE}.tmp")
+        echo "$server_list" > "$tmp_cache"
+        mv -f "$tmp_cache" "$CACHE_FILE"
+        chmod 0644 "$CACHE_FILE"
+        
+        echo "$server_list"
+        return 0
+    else
+        echo "Failed to fetch server list (timeout or invalid response)" >&2
+        
+        # If we have an old cache, use it as fallback
+        if [ -f "$CACHE_FILE" ]; then
+            echo "Using stale cache as fallback" >&2
+            cat "$CACHE_FILE"
+            return 0
+        fi
+        
+        return 1
+    fi
+}
+
 # Persist region data
 mkdir -p "$PERSIST_DIR"
 chmod 0755 "$PERSIST_DIR"
@@ -139,8 +191,8 @@ else
   if [ -n "$GATEWAY" ]; then
     echo "Looking up region from gateway IP: $GATEWAY"
     
-    # Get server list (only first line, which contains all the JSON)
-    SERVER_LIST=$(curl -s "https://serverlist.piaservers.net/vpninfo/servers/v7" 2>/dev/null | head -1)
+    # Get server list (cached or fresh)
+    SERVER_LIST=$(get_server_list)
     
     if [ -n "$SERVER_LIST" ]; then
       # Look up region by gateway IP

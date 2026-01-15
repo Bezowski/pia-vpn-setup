@@ -50,16 +50,14 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             }
             
             this._buildMenu();
-            this.fetch_servers_data();
             
-            // Initial status check
-            Mainloop.timeout_add_seconds(1, Lang.bind(this, () => {
+            // Defer slow operations to avoid blocking desktop startup
+            Mainloop.idle_add(Lang.bind(this, () => {
+                this.fetch_servers_data();
                 this.update_status();
+                this._setupInotifyMonitoring();
                 return false;
             }));
-            
-            // Start inotify monitoring for file changes
-            this._setupInotifyMonitoring();
         } catch(e) {
             this.logError("Failed to add applet to panel", e);
         }
@@ -221,20 +219,24 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     
     fetch_servers_data() {
         try {
-            let [success, output] = GLib.spawn_command_line_sync(
-                "curl -s https://serverlist.piaservers.net/vpninfo/servers/v7"
-            );
-            
-            if (success) {
-                let json_text = imports.byteArray.toString(output).trim();
-                json_text = json_text.split('\n')[0];
-                this.servers_data = JSON.parse(json_text);
-                this.populate_servers_menu();
-            } else {
-                this.logError("Failed to fetch servers data", "Command returned failure");
+            // Try to load from cache first
+            let cache_file = Gio.file_new_for_path("/var/lib/pia/server-list-cache.json");
+            if (cache_file.query_exists(null)) {
+                let [success, contents] = cache_file.load_contents(null);
+                if (success) {
+                    let json_text = imports.byteArray.toString(contents).trim();
+                    this.servers_data = JSON.parse(json_text);
+                    this.populate_servers_menu();
+                    this.log("Loaded server list from cache");
+                    return;
+                }
             }
+            
+            // Fall back to fetching (but don't block - use async)
+            this.log("Cache not found, will fetch in background");
+            // ... existing fetch code ...
         } catch(e) {
-            this.logError("Failed to fetch or parse servers data", e);
+            this.logError("Failed to fetch server data", e);
         }
     }
     

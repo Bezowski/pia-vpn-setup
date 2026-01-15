@@ -12,14 +12,14 @@ EnvironmentFile=-/var/lib/pia/region.txt
 # Wait for region.txt with gateway info, but don't block boot
 # If region.txt doesn't exist after 60 seconds, the service will still start
 # but pia-port-forward-wrapper.sh will handle the missing region.txt gracefully
-ExecStartPre=/bin/bash -c 'timeout 60 bash -c '"'"'while ! ([ -f /var/lib/pia/region.txt ] && grep -q "^gateway=" /var/lib/pia/region.txt); do sleep 1; done'"'"' || true'
+#ExecStartPre=/bin/bash -c 'timeout 60 bash -c '"'"'while ! ([ -f /var/lib/pia/region.txt ] && grep -q "^gateway=" /var/lib/pia/region.txt); do sleep 1; done'"'"' || true'
 
 # Run port forwarding wrapper which handles missing region.txt gracefully
 ExecStart=/usr/local/bin/pia-port-forward-wrapper.sh
 
 # Update firewall after port file is created
 # Wait up to 30 seconds for port file to appear
-ExecStartPost=/bin/bash -c 'for i in {1..30}; do [ -f /var/lib/pia/forwarded_port ] && /usr/local/bin/pia-firewall-update-wrapper.sh && break; sleep 1; done || true'
+ExecStartPost=/bin/bash -c 'sleep 2 && /usr/local/bin/pia-firewall-update-wrapper.sh || true'
 
 # Restart on failure - this ensures port forwarding restarts if it fails initially
 Restart=on-failure
