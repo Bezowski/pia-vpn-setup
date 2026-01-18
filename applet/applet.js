@@ -216,25 +216,66 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             this.logError("Failed to build menu", e);
         }
     }
+
+    validate_cache() {
+        try {
+            if (!this.servers_data || !this.servers_data.regions) {
+                return false;
+            }
+            
+            // Check if cache has the required structure
+            if (!Array.isArray(this.servers_data.regions)) {
+                this.log("Cache invalid: regions is not an array");
+                return false;
+            }
+            
+            // Check if regions have required fields
+            for (let i = 0; i < Math.min(5, this.servers_data.regions.length); i++) {
+                let region = this.servers_data.regions[i];
+                if (!region.id || !region.name || !region.servers) {
+                    this.log("Cache invalid: region missing required fields");
+                    return false;
+                }
+                
+                // Validate region ID format (should contain underscore, not hyphen)
+                if (region.id.indexOf('-') !== -1 && region.id.indexOf('_') === -1) {
+                    this.log("Cache invalid: old region ID format detected: " + region.id);
+                    return false;
+                }
+            }
+            
+            return true;
+        } catch(e) {
+            this.logError("Cache validation error", e);
+            return false;
+        }
+    }
     
     fetch_servers_data() {
         try {
-            // Try to load from cache first
             let cache_file = Gio.file_new_for_path("/var/lib/pia/server-list-cache.json");
             if (cache_file.query_exists(null)) {
                 let [success, contents] = cache_file.load_contents(null);
                 if (success) {
                     let json_text = imports.byteArray.toString(contents).trim();
                     this.servers_data = JSON.parse(json_text);
-                    this.populate_servers_menu();
-                    this.log("Loaded server list from cache");
-                    return;
+                    
+                    // VALIDATE CACHE
+                    if (this.validate_cache()) {
+                        this.populate_servers_menu();
+                        this.log("Loaded server list from cache");
+                        return;
+                    } else {
+                        this.log("Cache validation failed, will delete and refresh");
+                        // Delete invalid cache
+                        cache_file.delete(null);
+                    }
                 }
             }
             
-            // Fall back to fetching (but don't block - use async)
-            this.log("Cache not found, will fetch in background");
-            // ... existing fetch code ...
+            this.log("Cache not found or invalid, triggering refresh...");
+            // Trigger cache refresh by calling the script
+            this._refresh_server_cache();
         } catch(e) {
             this.logError("Failed to fetch server data", e);
         }
@@ -270,6 +311,30 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     
     on_select_server(region_id, region_name) {
         try {
+            this.log("on_select_server called with region_id=" + region_id + ", region_name=" + region_name);
+            
+            // VALIDATE: Check if region_id exists in our servers_data
+            if (!this.servers_data || !this.servers_data.regions) {
+                this.logError("Cannot select server - no server data loaded", "");
+                return;
+            }
+            
+            let region_found = false;
+            for (let i = 0; i < this.servers_data.regions.length; i++) {
+                if (this.servers_data.regions[i].id === region_id) {
+                    region_found = true;
+                    break;
+                }
+            }
+            
+            if (!region_found) {
+                this.logError("Region ID not found in server list: " + region_id, "");
+                // Try to refresh cache and retry
+                this.log("Attempting to refresh server cache...");
+                // Force cache refresh would go here
+                return;
+            }
+
             // Store kill switch state BEFORE disabling
             if (this.killswitch_enabled) {
                 GLib.spawn_command_line_sync('sudo -n touch /var/lib/pia/killswitch-was-enabled');

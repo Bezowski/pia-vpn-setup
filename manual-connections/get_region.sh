@@ -57,8 +57,25 @@ get_selected_region_data() {
   jq --arg REGION_ID "$selectedRegion" -r \
   '.regions[] | select(.id==$REGION_ID)')"
   if [[ -z $regionData ]]; then
-    echo -e "${red}The REGION_ID $selectedRegion is not valid.${nc}
-    "
+    echo -e "${red}The REGION_ID '$selectedRegion' is not valid.${nc}"
+    echo -e "${red}This may be due to:${nc}"
+    echo -e "${red}  1. The region ID format has changed${nc}"
+    echo -e "${red}  2. Cached server data is outdated${nc}"
+    echo -e "${red}  3. The region doesn't support your selected features (e.g., port forwarding)${nc}"
+    echo
+    echo -e "${green}Available regions for your configuration:${nc}"
+    
+    # Show available regions
+    if [[ $PIA_PF == "true" ]]; then
+      echo "$all_region_data" | jq -r '.regions[] | select(.port_forward==true) | "  " + .id + " - " + .name' | head -20
+    else
+      echo "$all_region_data" | jq -r '.regions[] | "  " + .id + " - " + .name' | head -20
+    fi
+    echo
+    echo -e "${green}To fix: Delete cache and retry:${nc}"
+    echo "  sudo rm /var/lib/pia/server-list-cache.json"
+    echo "  sudo systemctl restart pia-vpn.service"
+    echo
     exit 1
   fi
 }

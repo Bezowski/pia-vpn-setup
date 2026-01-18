@@ -117,6 +117,7 @@ export WG_HOSTNAME=$(echo "$REGION_OUTPUT" | grep -oP 'WG_HOSTNAME=\K[^ \\]+' | 
 get_server_list() {
     local CACHE_FILE="$PERSIST_DIR/server-list-cache.json"
     local CACHE_MAX_AGE=86400  # 24 hours
+    local CACHE_WARNING_AGE=43200  # 12 hours - warn if older
     local now=$(date +%s)
     
     # Check if cache exists and is fresh
@@ -124,10 +125,28 @@ get_server_list() {
         local cache_mtime=$(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0)
         local cache_age=$((now - cache_mtime))
         
+        # Warn if cache is getting old
+        if [ "$cache_age" -gt "$CACHE_WARNING_AGE" ] && [ "$cache_age" -lt "$CACHE_MAX_AGE" ]; then
+            echo "⚠️  Server list cache is ${cache_age}s old (will expire at ${CACHE_MAX_AGE}s)" >&2
+        fi
+        
         if [ "$cache_age" -lt "$CACHE_MAX_AGE" ]; then
-            echo "Using cached server list (age: ${cache_age}s)" >&2
-            cat "$CACHE_FILE"
-            return 0
+            # VALIDATE CACHE FORMAT before using
+            if echo "$(<"$CACHE_FILE")" | jq -e '.regions[0].id' >/dev/null 2>&1; then
+                local first_id=$(jq -r '.regions[0].id' "$CACHE_FILE" 2>/dev/null)
+                # Check if using old hyphen format
+                if echo "$first_id" | grep -q '^[a-z][a-z]-'; then
+                    echo "⚠️  Cache uses old region ID format (hyphens), forcing refresh..." >&2
+                    rm -f "$CACHE_FILE"
+                else
+                    echo "Using cached server list (age: ${cache_age}s)" >&2
+                    cat "$CACHE_FILE"
+                    return 0
+                fi
+            else
+                echo "⚠️  Cache file is corrupted, forcing refresh..." >&2
+                rm -f "$CACHE_FILE"
+            fi
         else
             echo "Cache expired (age: ${cache_age}s), fetching fresh list..." >&2
         fi
