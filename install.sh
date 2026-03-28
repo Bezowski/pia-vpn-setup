@@ -41,7 +41,6 @@ cp scripts/pia-port-forward-wrapper.sh /usr/local/bin/
 cp scripts/pia-firewall-update-wrapper.sh /usr/local/bin/
 cp scripts/pia-metrics.sh /usr/local/bin/
 cp scripts/pia-stats.sh /usr/local/bin/
-cp scripts/pia-notify.sh /usr/local/bin/
 cp scripts/pia-health-check.sh /usr/local/bin/
 chmod +x /usr/local/bin/pia-renew-and-connect-no-pf.sh
 chmod +x /usr/local/bin/pia-renew-token-only.sh
@@ -51,7 +50,6 @@ chmod +x /usr/local/bin/pia-port-forward-wrapper.sh
 chmod +x /usr/local/bin/pia-firewall-update-wrapper.sh
 chmod +x /usr/local/bin/pia-metrics.sh
 chmod +x /usr/local/bin/pia-stats.sh
-chmod +x /usr/local/bin/pia-notify.sh
 chmod +x /usr/local/bin/pia-health-check.sh
 
 # Copy PIA manual connections scripts (with our modifications)

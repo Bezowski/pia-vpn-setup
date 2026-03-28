@@ -44,17 +44,6 @@ get_dbus_address() {
     fi
 }
 
-# Notification wrapper - only sends if enabled in config
-notify_if_enabled() {
-    local notifications_enabled="true"
-    if [ -f /etc/pia-credentials ]; then
-        source /etc/pia-credentials
-        notifications_enabled=${PIA_NOTIFICATIONS:-"true"}
-    fi
-    if [ "$notifications_enabled" = "true" ]; then
-        /usr/local/bin/pia-notify.sh "$@" 2>/dev/null || true
-    fi
-}
 
 # Metrics logging wrapper
 log_metric() {
