@@ -61,18 +61,33 @@ setup() {
     ip route flush table $BYPASS_TABLE 2>/dev/null || true
     ip route add default via "$GATEWAY" dev "$IFACE" table $BYPASS_TABLE
 
-    # Rule for marked packets - MUST be checked before wg-quick's own rules
+    # Rule for the bypass user - MUST be checked before wg-quick's own rules
     # (observed on this system at priority 48-49; wg-quick's rule "not fwmark
     # 0xca6c lookup 51820" matches ANY mark other than its own loop-prevention
-    # mark, including ours, so if our rule is numerically higher it never gets
-    # reached and bypass traffic gets pulled back into the VPN table).
-    # Priority 10 keeps us well ahead of anything wg-quick or NetworkManager add.
-    ip rule del fwmark $BYPASS_MARK table $BYPASS_TABLE 2>/dev/null || true
-    ip rule add fwmark $BYPASS_MARK table $BYPASS_TABLE priority 10
+    # mark, so a fwmark-based rule numerically higher would never get reached).
+    #
+    # We route by UID rather than fwmark. A fwmark set via iptables mangle
+    # OUTPUT only takes effect *after* the kernel's original (unmarked) route
+    # lookup for the socket - for some socket types (e.g. ping's ICMP dgram
+    # socket) that original lookup has already picked the source address, and
+    # marking doesn't reliably force it to be re-picked. That left packets
+    # leaving via the physical interface but still carrying the VPN's internal
+    # tunnel address as their source - which no router can return a reply to.
+    # uidrange-based routing picks the correct table (and therefore the
+    # correct source address) from the very first lookup, before any packet
+    # is built, avoiding the problem entirely.
+    UID_NUM=$(id -u "$BYPASS_USER")
+    ip rule del uidrange ${UID_NUM}-${UID_NUM} table $BYPASS_TABLE 2>/dev/null || true
+    ip rule add uidrange ${UID_NUM}-${UID_NUM} table $BYPASS_TABLE priority 10
 
-    # Mark all traffic from the bypass user EXCEPT DNS.
-    # DNS must keep going through the tunnel because PIA's DNS server
-    # (10.0.0.243) is only reachable inside the VPN.
+    # Mark all traffic from the bypass user EXCEPT DNS. This mark is used
+    # ONLY so the kill switch can recognize and allow bypass traffic (see
+    # SPLIT_TUNNEL_MARK in pia-killswitch.sh) - actual routing is handled by
+    # the uidrange rule above, not this mark.
+    # DNS is still exempted from the mark for safety: PIA's DNS server
+    # (10.0.0.243) is only reachable inside the VPN, so anything explicitly
+    # querying it directly (rather than via the local systemd-resolved stub)
+    # needs to keep going through the tunnel.
     for chain_del in \
         "-p udp --dport 53 -j RETURN" \
         "-p tcp --dport 53 -j RETURN" \
@@ -106,8 +121,8 @@ status() {
         echo "(not set up yet)"
     fi
     echo
-    echo "ip rule:"
-    ip rule show | grep "$BYPASS_TABLE" || echo "  (not set)"
+    echo "ip rule (uidrange -> table $BYPASS_TABLE):"
+    ip rule show | grep "table $BYPASS_TABLE" || echo "  (not set)"
     echo
     echo "Route table $BYPASS_TABLE:"
     ip route show table $BYPASS_TABLE 2>/dev/null || echo "  (empty)"
@@ -123,7 +138,10 @@ status() {
 
 teardown() {
     require_root teardown
-    ip rule del fwmark $BYPASS_MARK table $BYPASS_TABLE 2>/dev/null || true
+    UID_NUM=$(id -u "$BYPASS_USER" 2>/dev/null || echo "")
+    if [ -n "$UID_NUM" ]; then
+        ip rule del uidrange ${UID_NUM}-${UID_NUM} table $BYPASS_TABLE 2>/dev/null || true
+    fi
     ip route flush table $BYPASS_TABLE 2>/dev/null || true
     for chain_del in \
         "-p udp --dport 53 -j RETURN" \
