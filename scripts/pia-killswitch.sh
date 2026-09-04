@@ -8,6 +8,7 @@ set -euo pipefail
 KILLSWITCH_ENABLED_FILE="/var/lib/pia/killswitch-enabled"
 LOCAL_NETWORK="10.234.225.0/24"  # Your local network - will be auto-detected
 TAILSCALE_NETWORK="100.64.0.0/10"
+SPLIT_TUNNEL_MARK="0x200"        # Must match BYPASS_MARK in pia-split-tunnel.sh
 
 # Colors
 RED='\033[0;31m'
@@ -49,7 +50,7 @@ enable_killswitch() {
     detect_local_network
     
     # Create nftables ruleset
-    cat > /tmp/pia-killswitch.nft << 'EOF'
+    cat > /tmp/pia-killswitch.nft << EOF
 #!/usr/sbin/nft -f
 
 # Flush existing PIA kill switch rules
@@ -68,13 +69,19 @@ table inet pia_killswitch {
         ct state established,related accept
         
         # Allow local network (LAN access)
-        ip daddr LOCAL_NETWORK accept
+        ip daddr $LOCAL_NETWORK accept
         
         # Allow Tailscale network
-        ip daddr TAILSCALE_NETWORK accept
+        ip daddr $TAILSCALE_NETWORK accept
         
         # Allow VPN interface
         oif "pia" accept
+        
+        # Allow split-tunnel bypass traffic (see pia-split-tunnel.sh).
+        # Packets from the bypass user are marked and routed out the
+        # physical gateway instead of "pia" - without this rule the
+        # kill switch would otherwise drop them.
+        meta mark $SPLIT_TUNNEL_MARK accept
         
         # Allow DNS to VPN gateway (before VPN is up)
         udp dport 53 accept
@@ -104,10 +111,6 @@ table inet pia_killswitch {
 }
 EOF
 
-    # Replace placeholders
-    sed -i "s|LOCAL_NETWORK|$LOCAL_NETWORK|g" /tmp/pia-killswitch.nft
-    sed -i "s|TAILSCALE_NETWORK|$TAILSCALE_NETWORK|g" /tmp/pia-killswitch.nft
-    
     # Apply rules
     if nft -f /tmp/pia-killswitch.nft; then
         print_status "Kill switch enabled"
@@ -165,6 +168,10 @@ status_killswitch() {
             fi
         else
             print_warning "VPN is NOT connected - all traffic blocked!"
+        fi
+        
+        if nft list table inet pia_killswitch | grep -q "$SPLIT_TUNNEL_MARK"; then
+            print_status "Split-tunnel bypass exception is active"
         fi
         
         echo
@@ -246,6 +253,23 @@ test_killswitch() {
         fi
     else
         print_warning "Tailscale interface not found"
+    fi
+    
+    # Test 5: Check split-tunnel bypass (if configured)
+    echo
+    echo "Test 5: Split-Tunnel Bypass"
+    if id novpn &>/dev/null && ip rule show | grep -q "$SPLIT_TUNNEL_MARK"; then
+        local bypass_ip=$(sudo -u novpn timeout 3 curl -s https://api.ipify.org 2>/dev/null || echo "")
+        if [ -n "$bypass_ip" ]; then
+            print_status "Bypass user can reach internet directly: $bypass_ip"
+            if [ -n "${public_ip:-}" ] && [ "$bypass_ip" = "$public_ip" ]; then
+                print_warning "Bypass IP matches VPN IP - split tunnel may not be routing correctly"
+            fi
+        else
+            print_warning "Bypass user could not reach internet"
+        fi
+    else
+        echo "  (split-tunnel not configured, skipping)"
     fi
     
     echo

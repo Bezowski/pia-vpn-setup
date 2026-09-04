@@ -32,6 +32,11 @@ Automated PIA VPN setup with WireGuard, port forwarding, and systemd integration
   - 5-minute cooldown between reconnect attempts
   - Comprehensive logging for troubleshooting
 
+- ✅ **Split Tunneling** - Route specific apps/commands outside the VPN
+  - User-based selector (`novpn`) with fwmark policy routing
+  - Kill switch aware (bypass traffic is explicitly allowed, not a leak)
+  - DNS for bypassed traffic still resolves through the tunnel
+
 ## Requirements
 
 * Ubuntu/Debian-based Linux (tested on Linux Mint 22.2)
@@ -137,6 +142,51 @@ tail -f /var/log/pia-watchdog.log     # View live log
 ```
 
 The watchdog automatically pauses when you click "Disconnect" in the applet and resumes when you click "Reconnect".
+
+## Split Tunneling
+
+By default every connection goes through the VPN. Split tunneling lets you carve out exceptions — specific apps or commands that bypass the tunnel and go out your normal internet connection instead, while everything else stays protected (and still covered by the kill switch).
+
+Selector is a dedicated Linux user (`novpn`). Anything you run as that user bypasses the VPN; everything else keeps using it.
+
+### Setup
+
+```bash
+sudo cp scripts/pia-split-tunnel.sh /usr/local/bin/
+sudo chmod +x /usr/local/bin/pia-split-tunnel.sh
+
+# Run once the VPN is connected (it reads the current physical gateway)
+sudo /usr/local/bin/pia-split-tunnel.sh setup
+```
+
+This creates the `novpn` user, a secondary routing table pointing at your physical gateway, a high-priority `ip rule` for marked traffic, an `iptables` mangle rule that marks `novpn`'s traffic (excluding DNS, which still needs to go through the tunnel to PIA's DNS server), and — if the kill switch is enabled — a bypass exception in the nftables ruleset.
+
+### Usage
+
+```bash
+sudo -u novpn -- curl ifconfig.me     # shows your real IP, not PIA's
+sudo -u novpn -- some-app
+```
+
+For GUI apps, you'll also need to share your X session:
+
+```bash
+xhost +SI:localuser:novpn
+sudo -u novpn env DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY firefox
+```
+
+### Status and teardown
+
+```bash
+sudo /usr/local/bin/pia-split-tunnel.sh status
+sudo /usr/local/bin/pia-split-tunnel.sh teardown   # removes routing rules, keeps the user
+```
+
+### Notes
+
+- **Kill switch compatibility**: `pia-killswitch.sh` has the bypass exception (`meta mark 0x200 accept`) baked directly into its ruleset, so it survives every enable/disable cycle. `pia-killswitch.sh test` includes a check that confirms the bypass user is actually reaching the internet directly (and warns if it isn't).
+- **Re-run `setup` after network changes** (new Wi-Fi network, gateway change) — it's idempotent and safe to run again.
+- **DNS for bypass traffic** is deliberately still routed through the tunnel to PIA's DNS server, since it's a private (`10.x`) address unreachable from outside the VPN. This doesn't leak anything; it just means bypass-user DNS queries are still private.
 
 ### Health Check
 
@@ -274,6 +324,7 @@ sudo ./run_setup.sh
 ### Security Scripts
 - `pia-killswitch.sh` - Network kill switch (blocks non-VPN traffic)
 - `pia-watchdog.sh` - Auto-recovery monitoring and reconnection
+- `pia-split-tunnel.sh` - Route specific apps/users outside the VPN tunnel
 
 ### Systemd Services and Timers
 - `pia-vpn.service` - Main VPN connection service
@@ -300,6 +351,7 @@ sudo ./run_setup.sh
   ├── token.txt                             # Authentication token
   ├── region.txt                            # Current region info
   ├── forwarded_port                        # Current forwarded port
+  ├── bypass-gateway                        # Split-tunnel physical gateway (cached)
   └── metrics/                              # Metrics and statistics
       ├── vpn-metrics.log                   # Event log (auto-rotated)
       └── stats.json                        # Statistics cache
