@@ -63,7 +63,7 @@ table inet pia_killswitch {
         type filter hook output priority -100; policy drop;
         
         # Allow loopback
-        oif "lo" accept
+        oifname "lo" accept
         
         # Allow established/related connections
         ct state established,related accept
@@ -74,8 +74,9 @@ table inet pia_killswitch {
         # Allow Tailscale network
         ip daddr $TAILSCALE_NETWORK accept
         
-        # Allow VPN interface
-        oif "pia" accept
+        # Allow VPN interface (oifname, not oif - matches by name so the
+        # ruleset still loads even when "pia" doesn't exist yet, e.g. VPN down)
+        oifname "pia" accept
         
         # Allow split-tunnel bypass traffic (see pia-split-tunnel.sh).
         # Packets from the bypass user are marked and routed out the
@@ -101,9 +102,9 @@ table inet pia_killswitch {
     chain forward {
         type filter hook forward priority -100; policy drop;
         
-        # Allow VPN forwarding
-        iif "pia" accept
-        oif "pia" accept
+        # Allow VPN forwarding (iifname/oifname - see note above)
+        iifname "pia" accept
+        oifname "pia" accept
         
         # Drop everything else
         drop
