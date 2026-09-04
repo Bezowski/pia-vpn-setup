@@ -61,10 +61,14 @@ setup() {
     ip route flush table $BYPASS_TABLE 2>/dev/null || true
     ip route add default via "$GATEWAY" dev "$IFACE" table $BYPASS_TABLE
 
-    # Rule for marked packets - priority 50 is checked BEFORE wg-quick's rules
-    # (wg-quick typically installs its rules around priority 32764-32766)
+    # Rule for marked packets - MUST be checked before wg-quick's own rules
+    # (observed on this system at priority 48-49; wg-quick's rule "not fwmark
+    # 0xca6c lookup 51820" matches ANY mark other than its own loop-prevention
+    # mark, including ours, so if our rule is numerically higher it never gets
+    # reached and bypass traffic gets pulled back into the VPN table).
+    # Priority 10 keeps us well ahead of anything wg-quick or NetworkManager add.
     ip rule del fwmark $BYPASS_MARK table $BYPASS_TABLE 2>/dev/null || true
-    ip rule add fwmark $BYPASS_MARK table $BYPASS_TABLE priority 50
+    ip rule add fwmark $BYPASS_MARK table $BYPASS_TABLE priority 10
 
     # Mark all traffic from the bypass user EXCEPT DNS.
     # DNS must keep going through the tunnel because PIA's DNS server
