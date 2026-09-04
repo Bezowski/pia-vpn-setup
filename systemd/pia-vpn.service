@@ -11,6 +11,11 @@ WorkingDirectory=/usr/local/bin/manual-connections
 TimeoutStartSec=5min
 ExecStartPre=/bin/sleep 2
 ExecStart=/bin/bash /usr/local/bin/pia-renew-and-connect-no-pf.sh
+# Re-apply split tunnel routing on every connect/reconnect (boot, suspend/
+# resume, watchdog recovery, manual reconnect). This is a no-op if split
+# tunneling was never set up (see pia-split-tunnel.sh reapply). The leading
+# "-" means a failure here won't fail the whole VPN service.
+ExecStartPost=-/usr/local/bin/pia-split-tunnel.sh reapply
 Restart=on-failure
 RestartSec=10
 

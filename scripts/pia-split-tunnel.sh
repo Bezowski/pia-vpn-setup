@@ -152,19 +152,58 @@ teardown() {
     echo "✓ Split tunnel rules removed (user $BYPASS_USER was left in place)"
 }
 
+# Re-apply the split tunnel automatically, but ONLY if it was already
+# configured at least once before (i.e. this machine has opted in). This is
+# what pia-vpn.service's ExecStartPost calls on every VPN connect/reconnect
+# (boot, suspend/resume, watchdog recovery, manual reconnect from the applet)
+# - the ip rule/route table don't survive any of those, but the physical
+# gateway can also change between them, so a full re-run of setup() each time
+# is what keeps things correct rather than just "did it once at boot".
+reapply() {
+    if [ -f "$GATEWAY_FILE" ] || id "$BYPASS_USER" &>/dev/null; then
+        setup
+    fi
+}
+
+# Launch a GUI app as the bypass user. Handles the X11 access grant so the
+# app actually gets a window - "sudo -u novpn some-gui-app" on its own will
+# fail because novpn has no X access by default. Run this as your normal
+# user (not root); it does NOT need sudo itself, only the exec inside does.
+launch() {
+    if ! id "$BYPASS_USER" &>/dev/null; then
+        echo "Error: bypass user '$BYPASS_USER' doesn't exist yet." >&2
+        echo "Run 'sudo $0 setup' first." >&2
+        exit 1
+    fi
+    if [ $# -eq 0 ]; then
+        echo "Usage: $0 launch <command> [args...]" >&2
+        echo "Example: $0 launch microsoft-edge-stable" >&2
+        exit 1
+    fi
+    # Grant X access by UID over the local socket - no XAUTHORITY juggling needed
+    xhost "+SI:localuser:$BYPASS_USER" >/dev/null 2>&1 || true
+    exec sudo -u "$BYPASS_USER" env DISPLAY="${DISPLAY:-:0}" "$@"
+}
+
 case "${1:-}" in
     setup) setup ;;
     status) status ;;
     teardown) teardown ;;
+    reapply) reapply ;;
+    launch) shift; launch "$@" ;;
     *)
         echo "PIA VPN Split Tunnel"
         echo
-        echo "Usage: $0 {setup|status|teardown}"
+        echo "Usage: $0 {setup|status|teardown|reapply|launch <cmd>}"
         echo
         echo "Commands:"
         echo "  setup     - Create bypass user + routing rules + killswitch exception"
         echo "  status    - Show current split-tunnel configuration"
         echo "  teardown  - Remove routing rules (keeps the bypass user)"
+        echo "  reapply   - Re-run setup only if already configured before"
+        echo "              (used automatically by pia-vpn.service on reconnect)"
+        echo "  launch    - Run a GUI app as the bypass user, e.g.:"
+        echo "                $0 launch microsoft-edge-stable"
         exit 1
         ;;
 esac

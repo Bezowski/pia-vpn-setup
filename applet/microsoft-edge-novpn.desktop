@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Microsoft Edge (No VPN)
+Comment=Launch Edge outside the PIA VPN tunnel (split tunnel bypass)
+Exec=/usr/local/bin/pia-split-tunnel.sh launch microsoft-edge-stable %U
+Icon=microsoft-edge
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+StartupWMClass=microsoft-edge
