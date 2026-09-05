@@ -44,7 +44,7 @@ Cmnd_Alias PIA_SYSTEMCTL_STATUS = /usr/bin/systemctl status pia-vpn.service, \
 Cmnd_Alias PIA_WG = /usr/bin/wg-quick up pia, \
                     /usr/bin/wg-quick down pia
 Cmnd_Alias PIA_EDITOR = /usr/bin/xed /etc/pia-credentials
-Cmnd_Alias PIA_CHMOD = /bin/chmod 644 /etc/pia-credentials, \
+Cmnd_Alias PIA_CHMOD = /bin/chmod 600 /etc/pia-credentials, \
                        /bin/chmod 640 /etc/pia-credentials
 
 # Allow sudo group to run these specific PIA commands without password
@@ -115,7 +115,7 @@ echo "  • sudo systemctl {start|stop|restart|status} pia-port-forward.service"
 echo "  • sudo wg-quick {up|down} pia"
 echo "  • sudo pia-set-credential.sh {region <id>|autoconnect <true|false>}"
 echo "  • sudo xed /etc/pia-credentials"
-echo "  • sudo chmod 644 /etc/pia-credentials"
+echo "  • sudo chmod 600 /etc/pia-credentials"
 echo
 echo "All other sudo commands will still require a password."
 echo

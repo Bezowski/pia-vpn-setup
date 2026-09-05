@@ -120,18 +120,25 @@ check_system_config() {
 # 2. Systemd Service Checks
 check_services() {
     print_header "Systemd Services"
-    
+
+    # pia-suspend.service is a Type=oneshot hook tied to sleep.target
+    # (StopWhenUnneeded=yes) - it's *supposed* to sit inactive except
+    # during an actual suspend/resume transition, so it's checked
+    # separately below rather than through the "should be active" loop.
+    # Manually starting it (the generic loop's suggested remedy) would run
+    # pia-suspend-handler.sh's pre-suspend logic - tearing down port
+    # forwarding - while the system is fully awake, which is actively
+    # harmful advice for this specific unit.
     local services=(
         "pia-vpn.service"
         "pia-token-renew.timer"
         "pia-port-forward.service"
-        "pia-suspend.service"
     )
-    
+
     for service in "${services[@]}"; do
         if systemctl is-enabled "$service" &>/dev/null; then
             print_pass "$service is enabled"
-            
+
             if systemctl is-active "$service" &>/dev/null; then
                 print_pass "$service is active"
             else
@@ -143,6 +150,13 @@ check_services() {
             print_info "Enable with: sudo systemctl enable $service"
         fi
     done
+
+    if systemctl is-enabled pia-suspend.service &>/dev/null; then
+        print_pass "pia-suspend.service is enabled"
+    else
+        print_fail "pia-suspend.service is not enabled"
+        print_info "Enable with: sudo systemctl enable pia-suspend.service"
+    fi
 }
 
 # 3. VPN Connection Checks

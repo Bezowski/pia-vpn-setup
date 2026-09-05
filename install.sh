@@ -186,7 +186,7 @@ Cmnd_Alias PIA_SYSTEMCTL_STATUS = /usr/bin/systemctl status pia-vpn.service, \
 Cmnd_Alias PIA_WG = /usr/bin/wg-quick up pia, \
                     /usr/bin/wg-quick down pia
 Cmnd_Alias PIA_EDITOR = /usr/bin/xed /etc/pia-credentials
-Cmnd_Alias PIA_CHMOD = /bin/chmod 644 /etc/pia-credentials, \
+Cmnd_Alias PIA_CHMOD = /bin/chmod 600 /etc/pia-credentials, \
                        /bin/chmod 640 /etc/pia-credentials
 
 # Allow sudo group to run these specific PIA commands without password

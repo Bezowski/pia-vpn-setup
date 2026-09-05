@@ -372,8 +372,14 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                             try {
                                 proc2.wait_finish(res2);
                                 if (proc2.get_exit_status() === 0) {
+                                    // 600, not 644: install.sh creates this
+                                    // file at 600 (PIA_USER/PIA_PASS are
+                                    // cleartext credentials) - re-asserting
+                                    // 600 here re-locks it down on every
+                                    // region change instead of leaving it
+                                    // world-readable afterward.
                                     Gio.Subprocess.new(
-                                        ['sudo', '-n', 'chmod', '644', '/etc/pia-credentials'],
+                                        ['sudo', '-n', 'chmod', '600', '/etc/pia-credentials'],
                                         Gio.SubprocessFlags.NONE
                                     );
                                     
