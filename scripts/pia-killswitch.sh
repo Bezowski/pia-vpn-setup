@@ -121,7 +121,7 @@ EOF
     # otherwise interleave with that check-then-add and leave it operating
     # on a table that's mid-recreation.
     mkdir -p "$(dirname "$PIA_KILLSWITCH_LOCK_FILE")"
-    if ( flock -w 5 9 && nft -f /tmp/pia-killswitch.nft ) 9>"$PIA_KILLSWITCH_LOCK_FILE"; then
+    if ( flock -w 5 9 && nft -f /tmp/pia-killswitch.nft ) 9>>"$PIA_KILLSWITCH_LOCK_FILE"; then
         print_status "Kill switch enabled"
         touch "$KILLSWITCH_ENABLED_FILE"
         
@@ -147,7 +147,7 @@ disable_killswitch() {
     echo "Disabling PIA VPN Kill Switch..."
     
     mkdir -p "$(dirname "$PIA_KILLSWITCH_LOCK_FILE")"
-    if ( flock -w 5 9 && nft delete table inet pia_killswitch 2>/dev/null ) 9>"$PIA_KILLSWITCH_LOCK_FILE"; then
+    if ( flock -w 5 9 && nft delete table inet pia_killswitch 2>/dev/null ) 9>>"$PIA_KILLSWITCH_LOCK_FILE"; then
         print_status "Kill switch disabled"
         rm -f "$KILLSWITCH_ENABLED_FILE"
         print_status "Normal traffic flow restored"

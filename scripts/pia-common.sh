@@ -13,6 +13,19 @@ readonly BASE_RETRY_SLEEP=2
 # the exception) and pia-killswitch.sh (enable/disable, which delete and
 # recreate the whole table) mutate this table from separate processes and
 # must serialize on the same lock file to avoid racing each other.
+#
+# IMPORTANT: every caller opens this file with `9>>` (append), never `9>`
+# (truncate) - nothing ever writes actual content to it (it's purely an
+# flock target), but the Cinnamon applet runs
+# `inotifywait -m -e modify,create /var/lib/pia/` and reacts to every
+# event by refreshing its whole status display. `9>` truncates the file
+# on every open even with zero bytes written, which is a real content
+# modification and fires inotify's MODIFY - and watch()'s poll loop opens
+# this file every 3 seconds regardless of whether anything was actually
+# missing, so a `9>` here means the applet redraws (and reruns several
+# subprocess spawns, including a ping) every 3 seconds forever. Verified
+# empirically with inotifywait: `9>` on an existing file fires MODIFY
+# every time; `9>>` fires nothing when no bytes are written.
 readonly PIA_KILLSWITCH_LOCK_FILE="/var/lib/pia/killswitch-exception.lock"
 
 # Get the real user (not root when running via sudo)

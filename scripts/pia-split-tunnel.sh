@@ -77,7 +77,7 @@ add_killswitch_exception_if_missing() {
             exit 1
         fi
         exit 0
-    ) 9>"$PIA_KILLSWITCH_LOCK_FILE"
+    ) 9>>"$PIA_KILLSWITCH_LOCK_FILE"
 }
 
 detect_physical_iface() {
