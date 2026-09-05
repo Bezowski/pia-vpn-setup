@@ -47,6 +47,18 @@ del_bypass_rule() {
     while ip rule del fwmark $BYPASS_MARK table $BYPASS_TABLE 2>/dev/null; do :; done
 }
 
+# `iptables -t mangle -S OUTPUT` displays -m owner --uid-owner matches
+# using the resolved *numeric* UID, never the original username - e.g.
+# adding a rule with `--uid-owner novpn` shows up as `--uid-owner 996`.
+# Any check here that greps for the literal string "$BYPASS_USER" against
+# that output can never match, incorrectly concluding the rule is always
+# missing (this previously caused ensure_mangle() to re-add three rules
+# on every 3-second poll, forever, since its check could never see them
+# as already present). Resolve to the UID once and grep for that instead.
+bypass_uid() {
+    id -u "$BYPASS_USER" 2>/dev/null
+}
+
 # Adds the kill switch bypass exception if it's missing, under a file lock
 # shared with pia-killswitch.sh's enable/disable (PIA_KILLSWITCH_LOCK_FILE,
 # from pia-common.sh) - without that, this script's own setup()/watch()
@@ -140,11 +152,17 @@ setup() {
     # reachable inside the VPN, so anything explicitly querying it directly
     # (rather than via the local systemd-resolved stub) needs to keep going
     # through the tunnel.
+    #
+    # Looped, not a single delete per rule: iptables -D (like ip rule del)
+    # only removes one matching rule per call. A single pass here left
+    # dozens of stale duplicates in place from a previous bug where
+    # ensure_mangle()'s check always reported "missing" and re-added three
+    # more rules every 3-second poll, forever.
     for chain_del in \
         "-p udp --dport 53 -j RETURN" \
         "-p tcp --dport 53 -j RETURN" \
         "-j MARK --set-mark $BYPASS_MARK"; do
-        iptables -t mangle -D OUTPUT -m owner --uid-owner "$BYPASS_USER" $chain_del 2>/dev/null || true
+        while iptables -t mangle -D OUTPUT -m owner --uid-owner "$BYPASS_USER" $chain_del 2>/dev/null; do :; done
     done
 
     iptables -t mangle -A OUTPUT -m owner --uid-owner "$BYPASS_USER" -p udp --dport 53 -j RETURN
@@ -162,7 +180,7 @@ setup() {
     # to whatever the egress interface's current address actually is,
     # regardless of what got baked in earlier - sidesteps the problem instead
     # of depending on route-reselection behaving consistently.
-    iptables -t nat -D POSTROUTING -o "$IFACE" -m mark --mark $BYPASS_MARK -j MASQUERADE 2>/dev/null || true
+    while iptables -t nat -D POSTROUTING -o "$IFACE" -m mark --mark $BYPASS_MARK -j MASQUERADE 2>/dev/null; do :; done
     iptables -t nat -A POSTROUTING -o "$IFACE" -m mark --mark $BYPASS_MARK -j MASQUERADE
 
     # Allow bypass traffic through the kill switch, if it's active
@@ -193,8 +211,8 @@ status() {
     echo "Route table $BYPASS_TABLE:"
     ip route show table $BYPASS_TABLE 2>/dev/null || echo "  (empty)"
     echo
-    echo "iptables mangle rules for $BYPASS_USER:"
-    iptables -t mangle -S OUTPUT | grep "$BYPASS_USER" || echo "  (none)"
+    echo "iptables mangle rules for $BYPASS_USER (uid $(bypass_uid)):"
+    iptables -t mangle -S OUTPUT | grep -- "--uid-owner $(bypass_uid) " || echo "  (none)"
     echo
     echo "iptables MASQUERADE rule (fixes source address):"
     iptables -t nat -S POSTROUTING | grep "$BYPASS_MARK" || echo "  (missing! re-run setup)"
@@ -213,12 +231,12 @@ teardown() {
         "-p udp --dport 53 -j RETURN" \
         "-p tcp --dport 53 -j RETURN" \
         "-j MARK --set-mark $BYPASS_MARK"; do
-        iptables -t mangle -D OUTPUT -m owner --uid-owner "$BYPASS_USER" $chain_del 2>/dev/null || true
+        while iptables -t mangle -D OUTPUT -m owner --uid-owner "$BYPASS_USER" $chain_del 2>/dev/null; do :; done
     done
     if [ -f "$GATEWAY_FILE" ]; then
         read -r IFACE _ < "$GATEWAY_FILE" 2>/dev/null || true
         if [ -n "${IFACE:-}" ]; then
-            iptables -t nat -D POSTROUTING -o "$IFACE" -m mark --mark $BYPASS_MARK -j MASQUERADE 2>/dev/null || true
+            while iptables -t nat -D POSTROUTING -o "$IFACE" -m mark --mark $BYPASS_MARK -j MASQUERADE 2>/dev/null; do :; done
         fi
     fi
     echo "✓ Split tunnel rules removed (user $BYPASS_USER was left in place)"
@@ -295,21 +313,26 @@ watch() {
         fi
     }
 
-    # `iptables -C` (check) is unreliable on this system's iptables-nft
-    # backend (v1.8.10) - confirmed empirically: `iptables -t mangle -C
-    # OUTPUT -m owner --uid-owner novpn -j MARK --set-mark 0x200` returned
-    # exit 0 (success, "rule exists") even though `iptables -t mangle -S
-    # OUTPUT` showed no such rule at all, and traffic from that user was
-    # genuinely failing. This means ensure_mangle()'s (and, by the same
-    # backend-level mechanism, ensure_masquerade()'s) check never actually
-    # detected the rule going missing, so it could never be re-added -
-    # likely the real explanation behind the "disappears on some
-    # unidentified trigger" symptom this watchdog was originally written
-    # to guard against. status() below already used a listing-based grep
-    # instead of -C and correctly reflected reality throughout this same
-    # incident, so both checks here now match that approach.
+    # CORRECTION to an earlier version of this comment: it blamed `iptables
+    # -C` itself as unreliable on this system's iptables-nft backend. That
+    # was wrong. The real bug was in THIS function's own check, which used
+    # `iptables -t mangle -S OUTPUT | grep "$BYPASS_USER"` (matching the
+    # literal string "novpn") - but -S always displays owner-match rules
+    # using the resolved *numeric* UID ("--uid-owner 996"), never the
+    # username, so that grep could never match, ever, regardless of
+    # whether the rule existed. This meant the "if missing" branch always
+    # ran, appending three more duplicate rules on every 3-second poll,
+    # forever, for as long as this watchdog was running - confirmed via
+    # `iptables -t mangle -S OUTPUT` showing ~90 duplicate copies. The
+    # original `-C`-based check this replaced was very likely correct the
+    # whole time (its comparison resolves usernames to UIDs before
+    # matching against the kernel's rule table, unlike a plain text grep
+    # against display output) - the actual "disappears on some
+    # unidentified trigger" mystery this watchdog was written to guard
+    # against remains unsolved as of this fix; don't assume ensure_mangle
+    # firing is evidence of it.
     ensure_mangle() {
-        if ! iptables -t mangle -S OUTPUT | grep -q "$BYPASS_USER"; then
+        if ! iptables -t mangle -S OUTPUT | grep -q -- "--uid-owner $(bypass_uid) "; then
             echo "$(date '+%F %T'): mangle marking missing, re-adding"
             iptables -t mangle -A OUTPUT -m owner --uid-owner "$BYPASS_USER" -p udp --dport 53 -j RETURN 2>/dev/null || true
             iptables -t mangle -A OUTPUT -m owner --uid-owner "$BYPASS_USER" -p tcp --dport 53 -j RETURN 2>/dev/null || true
