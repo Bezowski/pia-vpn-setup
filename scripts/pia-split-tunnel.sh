@@ -337,35 +337,59 @@ launch() {
     # Grant X access by UID over the local socket - no XAUTHORITY juggling needed
     xhost "+SI:localuser:$BYPASS_USER" >/dev/null 2>&1 || true
 
-    # Grant audio access the same way. The runtime dir housing PipeWire's
-    # sockets (/run/user/<uid>/) is 0700 (owner-only) - $BYPASS_USER can't
-    # traverse into it without this, regardless of the sockets' own
-    # permissions (symptom: Chromium-based browsers fall back to ALSA and
-    # log "PcmOpen: default,Host is down" - no audio, no error dialog).
-    # XDG_RUNTIME_DIR, not a protocol-specific var like PULSE_SERVER:
-    # ALSA's "default" device on this system is itself routed through
-    # PipeWire's *native* socket (/run/user/<uid>/pipewire-0), per
+    # Grant audio access. The runtime dir housing PipeWire's sockets
+    # (/run/user/<uid>/) is 0700 (owner-only) - $BYPASS_USER can't
+    # traverse into it without an explicit grant, regardless of the
+    # sockets' own permissions (symptom: Chromium-based browsers fall
+    # back to ALSA and log "PcmOpen: default,Host is down" - no audio, no
+    # error dialog). ALSA's "default" device on this system is itself
+    # routed through PipeWire's *native* socket
+    # (/run/user/<uid>/pipewire-0), per
     # /usr/share/alsa/alsa.conf.d/99-pipewire-default.conf - not the
-    # separate PulseAudio-compatibility socket at .../pulse/native. Both
-    # protocols (and anything else that follows the XDG base-dir spec)
-    # derive their socket path from XDG_RUNTIME_DIR, so overriding that
-    # one variable covers both rather than chasing each protocol's own
-    # override individually. Execute-only ACL (not read): lets
-    # $BYPASS_USER reach specific, already-known socket names without
-    # being able to list what else lives in the real user's runtime
-    # directory. Ephemeral (an ACL on a tmpfs dir systemd-logind recreates
-    # every login), same as the xhost grant above - redone on every
-    # launch rather than persisted anywhere.
+    # separate PulseAudio-compatibility socket at .../pulse/native, so
+    # both need covering.
+    #
+    # An earlier version of this pointed $BYPASS_USER's XDG_RUNTIME_DIR
+    # directly at the real user's runtime dir. That got audio working but
+    # broke everything else that dir is for: $BYPASS_USER has no write
+    # access there (only the execute-only ACL below), so dconf logged
+    # "unable to create file '.../dconf/user': Permission denied" on
+    # every launch, and PipeWire itself warned "XDG_RUNTIME_DIR is not
+    # owned by us" since it checks that invariant directly. Fixed by
+    # giving $BYPASS_USER a real, fully-owned runtime dir of its own
+    # (created fresh each launch, since /run is tmpfs and this needs root
+    # - only done when actually running as root, matching how this
+    # script is invoked in practice) and symlinking in just the specific
+    # audio sockets rather than sharing the whole directory. The
+    # execute-only ACL on the *real* user's directories is still required
+    # even with the symlinks in place: resolving a symlink to connect()
+    # still checks the target path's own permissions, a symlink doesn't
+    # bypass that.
     local runtime_dir="/run/user/$real_uid"
     local env_args=(DISPLAY="${DISPLAY:-:0}")
     if [ -d "$runtime_dir" ]; then
         setfacl -m "u:$BYPASS_USER:x" "$runtime_dir" 2>/dev/null || true
-        # Also covers the separate PulseAudio-compatibility protocol
-        # (.../pulse/native) in case an app's audio library tries that
-        # before falling back to ALSA/native PipeWire - belt and braces,
-        # still execute-only.
         [ -d "$runtime_dir/pulse" ] && setfacl -m "u:$BYPASS_USER:x" "$runtime_dir/pulse" 2>/dev/null || true
-        env_args+=(XDG_RUNTIME_DIR="$runtime_dir")
+
+        if [ "$EUID" -eq 0 ]; then
+            local bypass_runtime_dir="/run/user/$(bypass_uid)"
+            mkdir -p "$bypass_runtime_dir"
+            chown "$BYPASS_USER:$BYPASS_USER" "$bypass_runtime_dir"
+            chmod 0700 "$bypass_runtime_dir"
+            ln -sf "$runtime_dir/pipewire-0" "$bypass_runtime_dir/pipewire-0" 2>/dev/null || true
+            if [ -d "$runtime_dir/pulse" ]; then
+                mkdir -p "$bypass_runtime_dir/pulse"
+                chown "$BYPASS_USER:$BYPASS_USER" "$bypass_runtime_dir/pulse"
+                ln -sf "$runtime_dir/pulse/native" "$bypass_runtime_dir/pulse/native" 2>/dev/null || true
+            fi
+            env_args+=(XDG_RUNTIME_DIR="$bypass_runtime_dir")
+        else
+            # Not root (plain, non-sudo invocation) - can't create
+            # $BYPASS_USER's own runtime dir under /run, so fall back to
+            # pointing it at the real one directly. Audio still works;
+            # dconf's "permission denied" noise comes back in this path.
+            env_args+=(XDG_RUNTIME_DIR="$runtime_dir")
+        fi
     fi
 
     exec sudo -u "$BYPASS_USER" env "${env_args[@]}" "$@"
