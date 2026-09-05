@@ -9,6 +9,18 @@ set -euo pipefail
 
 BYPASS_TABLE=200
 BYPASS_MARK="0x200"
+# Must beat wg-quick's own auto-added rules (observed at priority 8: "from
+# all lookup main suppress_prefixlength 0", and priority 9: "not fwmark
+# ... lookup 51820"). Priority 8's suppress_prefixlength 0 only suppresses
+# a match against the literal 0.0.0.0/0 route; wg-quick's two /1 split-
+# default routes (0.0.0.0/1 + 128.0.0.0/1, both via the VPN interface) have
+# prefix length 1 and are NOT suppressed, so they match every destination
+# and win the lookup before our rule is ever reached - regardless of
+# fwmark - unless ours has a lower priority number. 1 is the lowest
+# available slot after "from all lookup local" (priority 0, must stay
+# first). wg-quick's auto-assigned priorities aren't guaranteed to stay at
+# 8/9 forever, but nothing legitimate needs 1-7, so this leaves headroom.
+BYPASS_RULE_PRIORITY=1
 BYPASS_USER="${PIA_BYPASS_USER:-novpn}"
 STATE_DIR="/var/lib/pia"
 GATEWAY_FILE="$STATE_DIR/bypass-gateway"
@@ -18,6 +30,14 @@ require_root() {
         echo "Error: run as root (sudo $0 $1)" >&2
         exit 1
     fi
+}
+
+# RTM_DELRULE removes one matching rule per call, not every matching rule -
+# so a single "ip rule del fwmark ... table ..." can leave an old duplicate
+# behind (e.g. one added at a stale priority by a previous version of this
+# script). Loop until none match.
+del_bypass_rule() {
+    while ip rule del fwmark $BYPASS_MARK table $BYPASS_TABLE 2>/dev/null; do :; done
 }
 
 detect_physical_iface() {
@@ -61,10 +81,8 @@ setup() {
     ip route flush table $BYPASS_TABLE 2>/dev/null || true
     ip route add default via "$GATEWAY" dev "$IFACE" table $BYPASS_TABLE
 
-    # Rule for marked packets - MUST be checked before wg-quick's own rules
-    # (observed on this system at priority 48-49; wg-quick's rule "not fwmark
-    # 0xca6c lookup 51820" matches ANY mark other than its own loop-prevention
-    # mark, so a rule numerically higher would never get reached).
+    # Rule for marked packets - see BYPASS_RULE_PRIORITY above for why this
+    # must be checked before wg-quick's own rules.
     #
     # We route by fwmark, not uidrange. uidrange initially seemed better -
     # it fixed a separate source-address bug (see MASQUERADE note below) by
@@ -74,8 +92,8 @@ setup() {
     # and deletes the rule outright within seconds of it being added. fwmark
     # uses a far older, universally-supported attribute and doesn't trigger
     # this.
-    ip rule del fwmark $BYPASS_MARK table $BYPASS_TABLE 2>/dev/null || true
-    ip rule add fwmark $BYPASS_MARK table $BYPASS_TABLE priority 10
+    del_bypass_rule
+    ip rule add fwmark $BYPASS_MARK table $BYPASS_TABLE priority $BYPASS_RULE_PRIORITY
 
     # Mark all traffic from the bypass user EXCEPT DNS.
     # DNS is exempted from the mark: PIA's DNS server (10.0.0.243) is only
@@ -109,7 +127,9 @@ setup() {
 
     # Allow bypass traffic through the kill switch, if it's active
     if nft list table inet pia_killswitch &>/dev/null; then
-        nft add rule inet pia_killswitch output meta mark $BYPASS_MARK accept 2>/dev/null || true
+        if ! nft list table inet pia_killswitch | grep -qE "meta mark 0x0*${BYPASS_MARK#0x} accept"; then
+            nft add rule inet pia_killswitch output meta mark $BYPASS_MARK accept 2>/dev/null || true
+        fi
         echo "✓ Kill switch updated to allow bypass traffic"
     fi
 
@@ -143,13 +163,13 @@ status() {
     echo
     if nft list table inet pia_killswitch &>/dev/null; then
         echo "Kill switch bypass rule:"
-        nft list table inet pia_killswitch | grep "$BYPASS_MARK" || echo "  (missing! re-run setup)"
+        nft list table inet pia_killswitch | grep -E "meta mark 0x0*${BYPASS_MARK#0x} accept" || echo "  (missing! re-run setup)"
     fi
 }
 
 teardown() {
     require_root teardown
-    ip rule del fwmark $BYPASS_MARK table $BYPASS_TABLE 2>/dev/null || true
+    del_bypass_rule
     ip route flush table $BYPASS_TABLE 2>/dev/null || true
     for chain_del in \
         "-p udp --dport 53 -j RETURN" \
@@ -199,26 +219,37 @@ launch() {
     exec sudo -u "$BYPASS_USER" env DISPLAY="${DISPLAY:-:0}" "$@"
 }
 
-# Self-healing watchdog. Two independent things get removed by something
-# external, on different schedules:
+# Self-healing watchdog.
 #  1. The ip rule - tailscaled's netlink route monitor removes this within
 #     seconds (confirmed via direct on/off testing), regardless of whether
 #     it's a fwmark or uidrange rule. Handled via "ip monitor rule" for
 #     near-instant reaction, since a 2-3s polling gap is enough for a whole
 #     curl attempt to fail before the next check would even notice.
-#  2. The iptables mangle marking rule, the MASQUERADE rule, and the kill
-#     switch's nft exception - these disappear together on a slower, so-far
-#     unidentified trigger (possibly something doing a broader "nft flush"
-#     that also happens to clear the iptables-nft-backed mangle table).
+#  2. The iptables mangle marking rule and the MASQUERADE rule can in
+#     principle be removed by something external too (no confirmed trigger
+#     seen so far), so they're checked on the same poll as a backstop.
 #     Handled via periodic polling since there's no equivalent event stream
 #     for iptables/nft changes to react to instantly.
+#  Note: an earlier version of ensure_killswitch() below matched the mark
+#  with a plain `grep "$BYPASS_MARK"` (e.g. "0x200"), but nft normalizes
+#  mark values to zero-padded hex when printing (e.g. "0x00000200"), which
+#  never matches - so it looked like the kill switch exception was
+#  "disappearing" constantly when actually the check itself was just always
+#  wrong, silently appending a duplicate accept rule every poll forever.
+#  The regex now tolerates the padding.
 watch() {
     echo "$(date '+%F %T'): watchdog started"
 
     ensure_rule() {
-        if ! ip rule show | grep -q "fwmark $BYPASS_MARK lookup $BYPASS_TABLE"; then
-            ip rule add fwmark $BYPASS_MARK table $BYPASS_TABLE priority 10 2>/dev/null || true
-            echo "$(date '+%F %T'): ip rule missing, re-added"
+        if ! ip rule show | grep -q "^${BYPASS_RULE_PRIORITY}:.*fwmark $BYPASS_MARK lookup $BYPASS_TABLE"; then
+            # Clean up any stale copy at the wrong priority first (e.g. left
+            # over from before BYPASS_RULE_PRIORITY was fixed to beat
+            # wg-quick's own rules) - having both would still leave the
+            # wrong (higher-numbered) one shadowed and useless, but it's
+            # dead weight and confusing to find during debugging.
+            del_bypass_rule
+            ip rule add fwmark $BYPASS_MARK table $BYPASS_TABLE priority $BYPASS_RULE_PRIORITY 2>/dev/null || true
+            echo "$(date '+%F %T'): ip rule missing or at wrong priority, re-added"
         fi
     }
 
@@ -244,7 +275,7 @@ watch() {
 
     ensure_killswitch() {
         if nft list table inet pia_killswitch &>/dev/null; then
-            if ! nft list table inet pia_killswitch | grep -q "$BYPASS_MARK"; then
+            if ! nft list table inet pia_killswitch | grep -qE "meta mark 0x0*${BYPASS_MARK#0x} accept"; then
                 echo "$(date '+%F %T'): kill switch exception missing, re-adding"
                 nft add rule inet pia_killswitch output meta mark $BYPASS_MARK accept 2>/dev/null || true
             fi

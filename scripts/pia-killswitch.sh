@@ -171,7 +171,7 @@ status_killswitch() {
             print_warning "VPN is NOT connected - all traffic blocked!"
         fi
         
-        if nft list table inet pia_killswitch | grep -q "$SPLIT_TUNNEL_MARK"; then
+        if nft list table inet pia_killswitch | grep -qE "meta mark 0x0*${SPLIT_TUNNEL_MARK#0x} accept"; then
             print_status "Split-tunnel bypass exception is active"
         fi
         
