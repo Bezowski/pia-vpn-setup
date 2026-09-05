@@ -31,6 +31,13 @@ cp scripts/pia-common.sh /usr/local/bin/
 chmod +x /usr/local/bin/pia-common.sh
 echo "✓ Common library installed"
 
+# Copy the narrowly-scoped credential-editing wrapper (see the
+# PIA_SET_CREDENTIAL sudoers alias below for why this exists instead of a
+# raw NOPASSWD sed rule)
+cp scripts/pia-set-credential.sh /usr/local/bin/
+chmod +x /usr/local/bin/pia-set-credential.sh
+echo "✓ Credential-editing wrapper installed"
+
 # Copy scripts
 echo "Installing scripts..."
 cp scripts/pia-renew-and-connect-no-pf.sh /usr/local/bin/
@@ -147,7 +154,20 @@ cat > /tmp/pia-sudoers-tmp << 'EOF'
 # This file allows the Cinnamon applet to control PIA VPN without password prompts
 
 # Define command aliases for better organization and security
-Cmnd_Alias PIA_SED = /usr/bin/sed -i [!-]* /etc/pia-credentials
+#
+# PIA_SET_CREDENTIAL: NOT raw sed. A previous version of this file used
+# `Cmnd_Alias PIA_SED = /usr/bin/sed -i [!-]* /etc/pia-credentials`, whose
+# `[!-]*` glob only blocks the sed script from starting with '-' - it does
+# not restrict the script's *content*. GNU sed's `e` command executes
+# arbitrary shell commands (e.g. `sudo sed -i '1e id > /tmp/pwned'
+# /etc/pia-credentials` satisfies that glob), so that rule granted
+# passwordless root code execution, not just credential-file editing.
+# Sudoers argument globbing can't safely scope a scripting language like
+# sed, so this instead grants NOPASSWD only on a wrapper script
+# (pia-set-credential.sh) that validates its arguments strictly before
+# ever building a sed script from them.
+Cmnd_Alias PIA_SET_CREDENTIAL = /usr/local/bin/pia-set-credential.sh region *, \
+                                 /usr/local/bin/pia-set-credential.sh autoconnect *
 Cmnd_Alias PIA_SYSTEMCTL_START = /usr/bin/systemctl start pia-vpn.service, \
                                   /usr/bin/systemctl start pia-port-forward.service
 Cmnd_Alias PIA_SYSTEMCTL_STOP = /usr/bin/systemctl stop pia-vpn.service, \
@@ -165,7 +185,7 @@ Cmnd_Alias PIA_CHMOD = /bin/chmod 644 /etc/pia-credentials, \
                        /bin/chmod 640 /etc/pia-credentials
 
 # Allow sudo group to run these specific PIA commands without password
-%sudo ALL=(ALL) NOPASSWD: PIA_SED, PIA_SYSTEMCTL_START, PIA_SYSTEMCTL_STOP, \
+%sudo ALL=(ALL) NOPASSWD: PIA_SET_CREDENTIAL, PIA_SYSTEMCTL_START, PIA_SYSTEMCTL_STOP, \
                           PIA_SYSTEMCTL_RESTART, PIA_SYSTEMCTL_STATUS, \
                           PIA_WG, PIA_EDITOR, PIA_CHMOD
 EOF

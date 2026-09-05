@@ -350,20 +350,21 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                     Gio.SubprocessFlags.NONE);
             }
             
-            let pattern1 = "s/^PREFERRED_REGION=.*/PREFERRED_REGION=" + region_id + "/";
-            let pattern2 = "s/^AUTOCONNECT=.*/AUTOCONNECT=false/";
-            
+            // Uses pia-set-credential.sh rather than raw sed - see that
+            // script's own comment, and the PIA_SET_CREDENTIAL sudoers
+            // alias, for why a NOPASSWD raw-sed rule was a privilege
+            // escalation hole.
             let proc1 = Gio.Subprocess.new(
-                ['sudo', '-n', 'sed', '-i', pattern1, '/etc/pia-credentials'],
+                ['sudo', '-n', '/usr/local/bin/pia-set-credential.sh', 'region', region_id],
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
             );
-            
+
             proc1.wait_async(null, Lang.bind(this, (proc1, res1) => {
                 try {
                     proc1.wait_finish(res1);
                     if (proc1.get_exit_status() === 0) {
                         let proc2 = Gio.Subprocess.new(
-                            ['sudo', '-n', 'sed', '-i', pattern2, '/etc/pia-credentials'],
+                            ['sudo', '-n', '/usr/local/bin/pia-set-credential.sh', 'autoconnect', 'false'],
                             Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
                         );
                         
@@ -965,10 +966,8 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                     Gio.SubprocessFlags.NONE);
             }
             
-            let pattern = "s/^AUTOCONNECT=.*/AUTOCONNECT=true/";
-            
             let proc = Gio.Subprocess.new(
-                ['sudo', '-n', 'sed', '-i', pattern, '/etc/pia-credentials'],
+                ['sudo', '-n', '/usr/local/bin/pia-set-credential.sh', 'autoconnect', 'true'],
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
             );
             

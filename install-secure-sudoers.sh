@@ -17,7 +17,20 @@ cat > /tmp/pia-vpn-sudoers << 'SUDOERS_EOF'
 # This file allows the Cinnamon applet to control PIA VPN without password prompts
 
 # Define command aliases for better organization and security
-Cmnd_Alias PIA_SED = /usr/bin/sed -i [!-]* /etc/pia-credentials
+#
+# PIA_SET_CREDENTIAL: NOT raw sed. A previous version of this file used
+# `Cmnd_Alias PIA_SED = /usr/bin/sed -i [!-]* /etc/pia-credentials`, whose
+# `[!-]*` glob only blocks the sed script from starting with '-' - it does
+# not restrict the script's *content*. GNU sed's `e` command executes
+# arbitrary shell commands (e.g. `sudo sed -i '1e id > /tmp/pwned'
+# /etc/pia-credentials` satisfies that glob), so that rule granted
+# passwordless root code execution, not just credential-file editing.
+# Sudoers argument globbing can't safely scope a scripting language like
+# sed, so this instead grants NOPASSWD only on a wrapper script
+# (pia-set-credential.sh) that validates its arguments strictly before
+# ever building a sed script from them.
+Cmnd_Alias PIA_SET_CREDENTIAL = /usr/local/bin/pia-set-credential.sh region *, \
+                                 /usr/local/bin/pia-set-credential.sh autoconnect *
 Cmnd_Alias PIA_SYSTEMCTL_START = /usr/bin/systemctl start pia-vpn.service, \
                                   /usr/bin/systemctl start pia-port-forward.service
 Cmnd_Alias PIA_SYSTEMCTL_STOP = /usr/bin/systemctl stop pia-vpn.service, \
@@ -35,7 +48,7 @@ Cmnd_Alias PIA_CHMOD = /bin/chmod 644 /etc/pia-credentials, \
                        /bin/chmod 640 /etc/pia-credentials
 
 # Allow sudo group to run these specific PIA commands without password
-%sudo ALL=(ALL) NOPASSWD: PIA_SED, PIA_SYSTEMCTL_START, PIA_SYSTEMCTL_STOP, \
+%sudo ALL=(ALL) NOPASSWD: PIA_SET_CREDENTIAL, PIA_SYSTEMCTL_START, PIA_SYSTEMCTL_STOP, \
                           PIA_SYSTEMCTL_RESTART, PIA_SYSTEMCTL_STATUS, \
                           PIA_WG, PIA_EDITOR, PIA_CHMOD
 
@@ -53,7 +66,7 @@ Cmnd_Alias NFT_LIST = /usr/sbin/nft list tables
 Cmnd_Alias PIA_MARKER = /usr/bin/touch /var/lib/pia/killswitch-was-enabled, \
                         /bin/rm -f /var/lib/pia/killswitch-was-enabled
 
-%sudo ALL=(ALL) NOPASSWD: PIA_SED, PIA_SYSTEMCTL_START, PIA_SYSTEMCTL_STOP, \
+%sudo ALL=(ALL) NOPASSWD: PIA_SET_CREDENTIAL, PIA_SYSTEMCTL_START, PIA_SYSTEMCTL_STOP, \
                           PIA_SYSTEMCTL_RESTART, PIA_SYSTEMCTL_STATUS, \
                           PIA_WG, PIA_EDITOR, PIA_CHMOD, PIA_WATCHDOG, \
                           PIA_KILLSWITCH, NFT_LIST, PIA_MARKER
@@ -100,7 +113,7 @@ echo "The following commands can now run without password:"
 echo "  • sudo systemctl {start|stop|restart|status} pia-vpn.service"
 echo "  • sudo systemctl {start|stop|restart|status} pia-port-forward.service"
 echo "  • sudo wg-quick {up|down} pia"
-echo "  • sudo sed -i ... /etc/pia-credentials"
+echo "  • sudo pia-set-credential.sh {region <id>|autoconnect <true|false>}"
 echo "  • sudo xed /etc/pia-credentials"
 echo "  • sudo chmod 644 /etc/pia-credentials"
 echo
