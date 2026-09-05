@@ -295,8 +295,21 @@ watch() {
         fi
     }
 
+    # `iptables -C` (check) is unreliable on this system's iptables-nft
+    # backend (v1.8.10) - confirmed empirically: `iptables -t mangle -C
+    # OUTPUT -m owner --uid-owner novpn -j MARK --set-mark 0x200` returned
+    # exit 0 (success, "rule exists") even though `iptables -t mangle -S
+    # OUTPUT` showed no such rule at all, and traffic from that user was
+    # genuinely failing. This means ensure_mangle()'s (and, by the same
+    # backend-level mechanism, ensure_masquerade()'s) check never actually
+    # detected the rule going missing, so it could never be re-added -
+    # likely the real explanation behind the "disappears on some
+    # unidentified trigger" symptom this watchdog was originally written
+    # to guard against. status() below already used a listing-based grep
+    # instead of -C and correctly reflected reality throughout this same
+    # incident, so both checks here now match that approach.
     ensure_mangle() {
-        if ! iptables -t mangle -C OUTPUT -m owner --uid-owner "$BYPASS_USER" -j MARK --set-mark $BYPASS_MARK 2>/dev/null; then
+        if ! iptables -t mangle -S OUTPUT | grep -q "$BYPASS_USER"; then
             echo "$(date '+%F %T'): mangle marking missing, re-adding"
             iptables -t mangle -A OUTPUT -m owner --uid-owner "$BYPASS_USER" -p udp --dport 53 -j RETURN 2>/dev/null || true
             iptables -t mangle -A OUTPUT -m owner --uid-owner "$BYPASS_USER" -p tcp --dport 53 -j RETURN 2>/dev/null || true
@@ -308,7 +321,7 @@ watch() {
         if [ -f "$GATEWAY_FILE" ]; then
             local iface
             read -r iface _ < "$GATEWAY_FILE"
-            if [ -n "$iface" ] && ! iptables -t nat -C POSTROUTING -o "$iface" -m mark --mark $BYPASS_MARK -j MASQUERADE 2>/dev/null; then
+            if [ -n "$iface" ] && ! iptables -t nat -S POSTROUTING | grep -q "$BYPASS_MARK"; then
                 echo "$(date '+%F %T'): MASQUERADE rule missing, re-adding"
                 iptables -t nat -A POSTROUTING -o "$iface" -m mark --mark $BYPASS_MARK -j MASQUERADE 2>/dev/null || true
             fi
