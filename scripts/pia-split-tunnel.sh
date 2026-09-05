@@ -199,16 +199,35 @@ launch() {
     exec sudo -u "$BYPASS_USER" env DISPLAY="${DISPLAY:-:0}" "$@"
 }
 
+# Self-healing watchdog: something on this system (observed: tailscaled's
+# netlink route monitor misfiring a "cleanup" of policy rules it doesn't
+# recognize) removes our ip rule within seconds of it being added, even
+# though the underlying route table is untouched. Rather than depend on
+# tracking down and fixing every possible external actor that could do this,
+# just check for it and re-add it continuously. Run via
+# pia-split-tunnel-watch.service (see systemd/pia-split-tunnel-watch.service).
+watch() {
+    echo "$(date '+%F %T'): watchdog started, checking every 5s"
+    while true; do
+        if ! ip rule show | grep -q "fwmark $BYPASS_MARK lookup $BYPASS_TABLE"; then
+            echo "$(date '+%F %T'): rule missing, re-adding"
+            ip rule add fwmark $BYPASS_MARK table $BYPASS_TABLE priority 10 2>/dev/null || true
+        fi
+        sleep 5
+    done
+}
+
 case "${1:-}" in
     setup) setup ;;
     status) status ;;
     teardown) teardown ;;
     reapply) reapply ;;
     launch) shift; launch "$@" ;;
+    watch) watch ;;
     *)
         echo "PIA VPN Split Tunnel"
         echo
-        echo "Usage: $0 {setup|status|teardown|reapply|launch <cmd>}"
+        echo "Usage: $0 {setup|status|teardown|reapply|launch <cmd>|watch}"
         echo
         echo "Commands:"
         echo "  setup     - Create bypass user + routing rules + killswitch exception"
@@ -218,6 +237,8 @@ case "${1:-}" in
         echo "              (used automatically by pia-vpn.service on reconnect)"
         echo "  launch    - Run a GUI app as the bypass user, e.g.:"
         echo "                $0 launch microsoft-edge-stable"
+        echo "  watch     - Foreground loop that re-adds the ip rule if"
+        echo "              something else removes it (run as a service)"
         exit 1
         ;;
 esac

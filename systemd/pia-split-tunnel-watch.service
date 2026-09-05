@@ -1,0 +1,16 @@
+[Unit]
+Description=PIA VPN Split Tunnel - watchdog against external removal of the bypass ip rule
+After=pia-vpn.service
+Wants=pia-vpn.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pia-split-tunnel.sh watch
+Restart=always
+RestartSec=5
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
