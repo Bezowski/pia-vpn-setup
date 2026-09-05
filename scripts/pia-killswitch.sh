@@ -114,8 +114,14 @@ table inet pia_killswitch {
 }
 EOF
 
-    # Apply rules
-    if nft -f /tmp/pia-killswitch.nft; then
+    # Apply rules. Locked against pia-split-tunnel.sh's
+    # add_killswitch_exception_if_missing(), which also mutates this table
+    # from a separate process (setup() on VPN reconnect, and the watchdog's
+    # poll loop) - without a shared lock, this delete-then-recreate could
+    # otherwise interleave with that check-then-add and leave it operating
+    # on a table that's mid-recreation.
+    mkdir -p "$(dirname "$PIA_KILLSWITCH_LOCK_FILE")"
+    if ( flock -w 5 9 && nft -f /tmp/pia-killswitch.nft ) 9>"$PIA_KILLSWITCH_LOCK_FILE"; then
         print_status "Kill switch enabled"
         touch "$KILLSWITCH_ENABLED_FILE"
         
@@ -140,7 +146,8 @@ EOF
 disable_killswitch() {
     echo "Disabling PIA VPN Kill Switch..."
     
-    if nft delete table inet pia_killswitch 2>/dev/null; then
+    mkdir -p "$(dirname "$PIA_KILLSWITCH_LOCK_FILE")"
+    if ( flock -w 5 9 && nft delete table inet pia_killswitch 2>/dev/null ) 9>"$PIA_KILLSWITCH_LOCK_FILE"; then
         print_status "Kill switch disabled"
         rm -f "$KILLSWITCH_ENABLED_FILE"
         print_status "Normal traffic flow restored"

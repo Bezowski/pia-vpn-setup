@@ -8,6 +8,13 @@ readonly MAX_WAIT_VPN_INTERFACE=60
 readonly MAX_RETRIES=5
 readonly BASE_RETRY_SLEEP=2
 
+# Shared lock guarding the pia_killswitch nft table's bypass-exception rule.
+# Both pia-split-tunnel.sh (setup()/watch()'s ensure_killswitch(), adding
+# the exception) and pia-killswitch.sh (enable/disable, which delete and
+# recreate the whole table) mutate this table from separate processes and
+# must serialize on the same lock file to avoid racing each other.
+readonly PIA_KILLSWITCH_LOCK_FILE="/var/lib/pia/killswitch-exception.lock"
+
 # Get the real user (not root when running via sudo)
 get_real_user() {
     if [ -n "${SUDO_USER:-}" ]; then

@@ -26,9 +26,13 @@ BYPASS_RULE_PRIORITY=1
 BYPASS_USER="${PIA_BYPASS_USER:-novpn}"
 STATE_DIR="/var/lib/pia"
 GATEWAY_FILE="$STATE_DIR/bypass-gateway"
-KILLSWITCH_LOCK_FILE="$STATE_DIR/killswitch-exception.lock"
 
-require_root() {
+# Prints which subcommand needs root, unlike pia-common.sh's generic
+# require_root() - kept under a distinct name (rather than redefining
+# require_root here, which would silently shadow the sourced one and trap
+# a future maintainer editing pia-common.sh's version expecting it to
+# apply here too).
+require_root_for_command() {
     if [ "$EUID" -ne 0 ]; then
         echo "Error: run as root (sudo $0 $1)" >&2
         exit 1
@@ -43,24 +47,37 @@ del_bypass_rule() {
     while ip rule del fwmark $BYPASS_MARK table $BYPASS_TABLE 2>/dev/null; do :; done
 }
 
-# Adds the kill switch bypass exception if it's missing, under a file lock.
+# Adds the kill switch bypass exception if it's missing, under a file lock
+# shared with pia-killswitch.sh's enable/disable (PIA_KILLSWITCH_LOCK_FILE,
+# from pia-common.sh) - without that, this script's own setup()/watch()
+# calls would be serialized against each other but not against
+# pia-killswitch.sh independently deleting and recreating the whole table,
+# leaving a narrower but still-real window for the add to silently fail
+# against a table that just vanished underneath it.
+#
 # setup() (invoked by pia-vpn.service's reapply on every VPN reconnect) and
 # watch()'s ensure_killswitch() (polling every 3s, plus reacting to ip rule
 # deletions) run as separate processes and can otherwise both observe the
 # rule "missing" at the same instant and both add it - recreating the very
 # duplicate-rule bug fixed elsewhere in this script, just via a race
-# instead of deterministically. Returns 0 if it just added the rule, 1 if
-# it was already present (or the table doesn't exist, or the lock timed
-# out).
+# instead of deterministically. Returns 0 only if it just added the rule
+# AND that add actually succeeded, 1 otherwise (already present, table
+# doesn't exist, lock timed out, or the add itself failed - the last case
+# is logged to stderr since callers can no longer tell it apart from
+# "already present" just from the exit code).
 add_killswitch_exception_if_missing() {
     mkdir -p "$STATE_DIR"
     (
         flock -w 5 9 || exit 1
-        nft list table inet pia_killswitch &>/dev/null || exit 1
-        nft list table inet pia_killswitch | grep -qE "$(nft_mark_accept_pattern "$BYPASS_MARK")" && exit 1
-        nft add rule inet pia_killswitch output meta mark $BYPASS_MARK accept 2>/dev/null || true
+        local current
+        current=$(nft list table inet pia_killswitch 2>/dev/null) || exit 1
+        echo "$current" | grep -qE "$(nft_mark_accept_pattern "$BYPASS_MARK")" && exit 1
+        if ! nft add rule inet pia_killswitch output meta mark $BYPASS_MARK accept; then
+            echo "$(date '+%F %T'): add_killswitch_exception_if_missing: nft add rule failed" >&2
+            exit 1
+        fi
         exit 0
-    ) 9>"$KILLSWITCH_LOCK_FILE"
+    ) 9>"$PIA_KILLSWITCH_LOCK_FILE"
 }
 
 detect_physical_iface() {
@@ -74,7 +91,7 @@ detect_physical_gateway() {
 }
 
 setup() {
-    require_root setup
+    require_root_for_command setup
 
     echo "Setting up split tunnel bypass for user: $BYPASS_USER"
 
@@ -189,7 +206,7 @@ status() {
 }
 
 teardown() {
-    require_root teardown
+    require_root_for_command teardown
     del_bypass_rule
     ip route flush table $BYPASS_TABLE 2>/dev/null || true
     for chain_del in \
