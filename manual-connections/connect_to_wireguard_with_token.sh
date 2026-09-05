@@ -34,13 +34,37 @@ fi
 DEFAULT_PIA_CONF_PATH=/etc/wireguard/pia.conf
 : "${PIA_CONF_PATH:=$DEFAULT_PIA_CONF_PATH}"
 
-if [[ -f /proc/net/if_inet6 ]] &&
-  [[ $(sysctl -n net.ipv6.conf.all.disable_ipv6) -ne 1 ||
-     $(sysctl -n net.ipv6.conf.default.disable_ipv6) -ne 1 ]]
-then
-  echo -e "${red}You should consider disabling IPv6 by running:"
-  echo "sysctl -w net.ipv6.conf.all.disable_ipv6=1"
-  echo -e "sysctl -w net.ipv6.conf.default.disable_ipv6=1${nc}"
+# Actually apply DISABLE_IPV6 from /etc/pia-credentials, rather than just
+# suggesting the user run these sysctl commands themselves (the previous
+# behavior here, inherited from upstream PIA's script - it printed a
+# warning regardless of what DISABLE_IPV6 was set to, since it never
+# looked at that variable at all). README.md and CONFIGURATION.md both
+# document DISABLE_IPV6 as an enforced leak-prevention setting ("CRITICAL:
+# Prevent leaks"), so it needs to actually do something. Applied live via
+# sysctl -w AND persisted via a sysctl.d drop-in so it survives reboots,
+# not just this process's runtime - re-asserted on every VPN connect,
+# which also makes it self-healing if something else re-enables IPv6
+# between runs. Defaults to "yes" if unset, matching the same default
+# pia-renew-and-connect-no-pf.sh already uses for this variable.
+: "${DISABLE_IPV6:=yes}"
+if [[ -f /proc/net/if_inet6 ]]; then
+  SYSCTL_IPV6_DROPIN=/etc/sysctl.d/99-pia-disable-ipv6.conf
+  case "$DISABLE_IPV6" in
+    yes|true)
+      sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
+      sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
+      tmp_sysctl_ipv6="$(mktemp "${SYSCTL_IPV6_DROPIN}.XXXX")"
+      printf 'net.ipv6.conf.all.disable_ipv6 = 1\nnet.ipv6.conf.default.disable_ipv6 = 1\n' > "$tmp_sysctl_ipv6"
+      chmod 0644 "$tmp_sysctl_ipv6"
+      mv -f "$tmp_sysctl_ipv6" "$SYSCTL_IPV6_DROPIN"
+      echo -e "${green}IPv6 disabled (prevents leaks outside the tunnel), persisted across reboots.${nc}"
+      ;;
+    *)
+      sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1 || true
+      sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1 || true
+      rm -f "$SYSCTL_IPV6_DROPIN"
+      ;;
+  esac
 fi
 
 if [[ -z $WG_SERVER_IP ||
