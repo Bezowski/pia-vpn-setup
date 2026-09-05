@@ -63,17 +63,28 @@ save_current_region() {
 
 get_and_persist_token() {
   echo "Getting authentication token..."
-  if ./get_token.sh 2>&1 | tee /tmp/get_token_output.log | grep -q "OK"; then
+  # Captured to a variable rather than `tee`'d to a file: get_token.sh
+  # echoes the raw token to stdout (PIA_TOKEN=...), and a fixed /tmp path
+  # created with default permissions is world-readable - any other local
+  # user (including the low-privilege novpn split-tunnel user) could read
+  # a live PIA auth token from it. Nothing else in this project reads
+  # this output back, so there's no need to persist it to disk at all.
+  local token_output
+  token_output=$(./get_token.sh 2>&1)
+  if echo "$token_output" | grep -q "OK"; then
     echo "✓ get_token.sh succeeded"
   else
     echo "⚠️  get_token.sh had issues, checking for token file..."
   fi
-  
+
   if [ -f /opt/piavpn-manual/token ]; then
     echo "  Token file found in /opt/piavpn-manual/token"
     mkdir -p "$PERSIST_DIR"
     head -1 /opt/piavpn-manual/token > "$PERSIST_DIR/token.txt"
-    chmod 644 "$PERSIST_DIR/token.txt"
+    # 0600, not 644: matches pia-renew-token-only.sh's handling of this
+    # same file - it's a live PIA auth token, not something other local
+    # users need to read.
+    chmod 0600 "$PERSIST_DIR/token.txt"
     echo "  ✓ Token persisted to $PERSIST_DIR/token.txt"
     return 0
   else
