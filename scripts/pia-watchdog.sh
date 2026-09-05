@@ -16,6 +16,12 @@ STATE_DIR="/var/lib/pia"
 STATE_FILE="$STATE_DIR/watchdog-state"
 PAUSE_FILE="$STATE_DIR/watchdog-paused"
 LOG_FILE="/var/log/pia-watchdog.log"
+# Marks that recover_vpn() disabled the kill switch and it still needs to
+# be turned back on. Survives across watchdog restarts/cycles so a
+# recovery that times out here (see recover_vpn()) doesn't leave the kill
+# switch off forever - maybe_reenable_killswitch() checks it independently
+# on every cycle where the VPN is confirmed healthy.
+KILLSWITCH_WATCHDOG_FLAG="$STATE_DIR/killswitch-was-enabled-watchdog"
 
 # Ensure directories exist
 mkdir -p "$STATE_DIR"
@@ -118,7 +124,7 @@ recover_vpn() {
         log "Kill switch is on, temporarily disabling for reconnect..."
         killswitch_was_on=true
         /usr/local/bin/pia-killswitch.sh disable
-        touch "$PERSIST_DIR/killswitch-was-enabled-watchdog"
+        touch "$KILLSWITCH_WATCHDOG_FLAG"
         sleep 2
     fi
     
@@ -151,7 +157,7 @@ recover_vpn() {
                         sleep 2
                         if /usr/local/bin/pia-killswitch.sh enable; then
                             log "✓ Kill switch re-enabled"
-                            rm -f "$PERSIST_DIR/killswitch-was-enabled-watchdog"
+                            rm -f "$KILLSWITCH_WATCHDOG_FLAG"
                         else
                             log "⚠️ Failed to re-enable kill switch, will retry"
                         fi
@@ -175,6 +181,26 @@ recover_vpn() {
     else
         log_error "Failed to restart VPN service"
         return 1
+    fi
+}
+
+# Backstop for recover_vpn() timing out after disabling the kill switch
+# (its own re-enable only runs in the success branch of the 30s wait loop -
+# if that wait times out, or the process is killed/restarted before then,
+# KILLSWITCH_WATCHDOG_FLAG is left behind with the kill switch still off).
+# Checked on every cycle where health_check() independently confirms the
+# VPN is healthy, so a recovery that eventually succeeds - even outside
+# recover_vpn()'s own success path - still gets the kill switch back on
+# instead of leaving it off indefinitely.
+maybe_reenable_killswitch() {
+    if [ -f "$KILLSWITCH_WATCHDOG_FLAG" ]; then
+        log "Kill switch was left disabled after a previous recovery attempt, re-enabling..."
+        if /usr/local/bin/pia-killswitch.sh enable; then
+            log "✓ Kill switch re-enabled"
+            rm -f "$KILLSWITCH_WATCHDOG_FLAG"
+        else
+            log_error "Failed to re-enable kill switch (will retry next cycle)"
+        fi
     fi
 }
 
@@ -205,6 +231,7 @@ monitor() {
                 FAILURE_COUNT=0
                 save_state
             fi
+            maybe_reenable_killswitch
         else
             # VPN has issues
             FAILURE_COUNT=$((FAILURE_COUNT + 1))
