@@ -130,7 +130,7 @@ status() {
     fi
     echo
     echo "ip rule (fwmark -> table $BYPASS_TABLE):"
-    ip rule show | grep "table $BYPASS_TABLE" || echo "  (not set)"
+    ip rule show | grep "lookup $BYPASS_TABLE" || echo "  (not set)"
     echo
     echo "Route table $BYPASS_TABLE:"
     ip route show table $BYPASS_TABLE 2>/dev/null || echo "  (empty)"
@@ -199,21 +199,47 @@ launch() {
     exec sudo -u "$BYPASS_USER" env DISPLAY="${DISPLAY:-:0}" "$@"
 }
 
-# Self-healing watchdog: something on this system (observed: tailscaled's
-# netlink route monitor misfiring a "cleanup" of policy rules it doesn't
-# recognize) removes our ip rule within seconds of it being added, even
-# though the underlying route table is untouched. Rather than depend on
-# tracking down and fixing every possible external actor that could do this,
-# just check for it and re-add it continuously. Run via
-# pia-split-tunnel-watch.service (see systemd/pia-split-tunnel-watch.service).
+# Self-healing watchdog: tailscaled's netlink route monitor removes our ip
+# rule (confirmed via direct on/off testing - stopping tailscaled makes the
+# rule stay put indefinitely; starting it, the rule is gone within seconds,
+# every time, regardless of whether the rule uses fwmark or uidrange
+# selectors). This is a bug in tailscaled's route cleanup logic, not
+# something fixable from our side.
+#
+# A polling loop checking every few seconds isn't fast enough - once
+# tailscaled deletes the rule, a curl attempt can retry for its entire
+# timeout window (5+ seconds) before the next poll would even notice.
+# Instead, use "ip monitor rule" to react the instant a delete happens,
+# typically within milliseconds - fast enough that it shouldn't cost more
+# than a single dropped packet, if that.
 watch() {
-    echo "$(date '+%F %T'): watchdog started, checking every 5s"
-    while true; do
+    echo "$(date '+%F %T'): watchdog started (event-driven via ip monitor)"
+
+    ensure_rule() {
         if ! ip rule show | grep -q "fwmark $BYPASS_MARK lookup $BYPASS_TABLE"; then
-            echo "$(date '+%F %T'): rule missing, re-adding"
             ip rule add fwmark $BYPASS_MARK table $BYPASS_TABLE priority 10 2>/dev/null || true
+            echo "$(date '+%F %T'): rule missing, re-added"
         fi
-        sleep 5
+    }
+
+    ensure_rule
+
+    # "ip monitor rule" streams every rule add/delete on the system. Filter
+    # for delete events, then re-check regardless of which table was
+    # mentioned (parsing the line reliably across ip/iproute2 versions is
+    # fragile - a redundant check-and-add is cheap and always safe).
+    stdbuf -oL ip monitor rule 2>/dev/null | while read -r line; do
+        case "$line" in
+            Deleted*) ensure_rule ;;
+        esac
+    done
+
+    # If "ip monitor rule" itself ever exits (shouldn't under normal
+    # operation), fall back to polling rather than leaving nothing running.
+    echo "$(date '+%F %T'): ip monitor rule exited unexpectedly, falling back to polling"
+    while true; do
+        ensure_rule
+        sleep 2
     done
 }
 
