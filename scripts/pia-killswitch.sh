@@ -4,6 +4,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/pia-common.sh"
+
 # Configuration
 KILLSWITCH_ENABLED_FILE="/var/lib/pia/killswitch-enabled"
 LOCAL_NETWORK="10.234.225.0/24"  # Your local network - will be auto-detected
@@ -171,7 +173,7 @@ status_killswitch() {
             print_warning "VPN is NOT connected - all traffic blocked!"
         fi
         
-        if nft list table inet pia_killswitch | grep -qE "meta mark 0x0*${SPLIT_TUNNEL_MARK#0x} accept"; then
+        if nft list table inet pia_killswitch | grep -qE "$(nft_mark_accept_pattern "$SPLIT_TUNNEL_MARK")"; then
             print_status "Split-tunnel bypass exception is active"
         fi
         

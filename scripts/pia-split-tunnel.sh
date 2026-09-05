@@ -7,6 +7,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/pia-common.sh"
+
 BYPASS_TABLE=200
 BYPASS_MARK="0x200"
 # Must beat wg-quick's own auto-added rules (observed at priority 8: "from
@@ -24,6 +26,7 @@ BYPASS_RULE_PRIORITY=1
 BYPASS_USER="${PIA_BYPASS_USER:-novpn}"
 STATE_DIR="/var/lib/pia"
 GATEWAY_FILE="$STATE_DIR/bypass-gateway"
+KILLSWITCH_LOCK_FILE="$STATE_DIR/killswitch-exception.lock"
 
 require_root() {
     if [ "$EUID" -ne 0 ]; then
@@ -38,6 +41,26 @@ require_root() {
 # script). Loop until none match.
 del_bypass_rule() {
     while ip rule del fwmark $BYPASS_MARK table $BYPASS_TABLE 2>/dev/null; do :; done
+}
+
+# Adds the kill switch bypass exception if it's missing, under a file lock.
+# setup() (invoked by pia-vpn.service's reapply on every VPN reconnect) and
+# watch()'s ensure_killswitch() (polling every 3s, plus reacting to ip rule
+# deletions) run as separate processes and can otherwise both observe the
+# rule "missing" at the same instant and both add it - recreating the very
+# duplicate-rule bug fixed elsewhere in this script, just via a race
+# instead of deterministically. Returns 0 if it just added the rule, 1 if
+# it was already present (or the table doesn't exist, or the lock timed
+# out).
+add_killswitch_exception_if_missing() {
+    mkdir -p "$STATE_DIR"
+    (
+        flock -w 5 9 || exit 1
+        nft list table inet pia_killswitch &>/dev/null || exit 1
+        nft list table inet pia_killswitch | grep -qE "$(nft_mark_accept_pattern "$BYPASS_MARK")" && exit 1
+        nft add rule inet pia_killswitch output meta mark $BYPASS_MARK accept 2>/dev/null || true
+        exit 0
+    ) 9>"$KILLSWITCH_LOCK_FILE"
 }
 
 detect_physical_iface() {
@@ -127,9 +150,7 @@ setup() {
 
     # Allow bypass traffic through the kill switch, if it's active
     if nft list table inet pia_killswitch &>/dev/null; then
-        if ! nft list table inet pia_killswitch | grep -qE "meta mark 0x0*${BYPASS_MARK#0x} accept"; then
-            nft add rule inet pia_killswitch output meta mark $BYPASS_MARK accept 2>/dev/null || true
-        fi
+        add_killswitch_exception_if_missing || true
         echo "✓ Kill switch updated to allow bypass traffic"
     fi
 
@@ -163,7 +184,7 @@ status() {
     echo
     if nft list table inet pia_killswitch &>/dev/null; then
         echo "Kill switch bypass rule:"
-        nft list table inet pia_killswitch | grep -E "meta mark 0x0*${BYPASS_MARK#0x} accept" || echo "  (missing! re-run setup)"
+        nft list table inet pia_killswitch | grep -E "$(nft_mark_accept_pattern "$BYPASS_MARK")" || echo "  (missing! re-run setup)"
     fi
 }
 
@@ -236,7 +257,11 @@ launch() {
 #  never matches - so it looked like the kill switch exception was
 #  "disappearing" constantly when actually the check itself was just always
 #  wrong, silently appending a duplicate accept rule every poll forever.
-#  The regex now tolerates the padding.
+#  The regex now tolerates the padding, and the check-then-add is wrapped
+#  in add_killswitch_exception_if_missing() (see above) under a flock,
+#  since this poll runs as a separate process from setup()'s own
+#  check-then-add and the two could otherwise race each other into adding
+#  a duplicate the same way.
 watch() {
     echo "$(date '+%F %T'): watchdog started"
 
@@ -275,9 +300,8 @@ watch() {
 
     ensure_killswitch() {
         if nft list table inet pia_killswitch &>/dev/null; then
-            if ! nft list table inet pia_killswitch | grep -qE "meta mark 0x0*${BYPASS_MARK#0x} accept"; then
+            if add_killswitch_exception_if_missing; then
                 echo "$(date '+%F %T'): kill switch exception missing, re-adding"
-                nft add rule inet pia_killswitch output meta mark $BYPASS_MARK accept 2>/dev/null || true
             fi
         fi
     }

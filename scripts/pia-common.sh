@@ -150,6 +150,19 @@ atomic_write() {
     mv -f "$tmp_file" "$target_file"
 }
 
+# Build the grep -E pattern for an nft "accept" rule matching a given meta
+# mark. nft normalizes mark values to zero-padded hex when printing (e.g.
+# 0x00000200), so a plain substring grep for "0x200" never matches - this
+# tolerates the padding. Centralized here because split-tunnel bypass
+# exception checks need the identical pattern in multiple scripts
+# (pia-split-tunnel.sh and pia-killswitch.sh) and drifting out of sync
+# already caused one bug (a watchdog that always thought the rule was
+# missing and kept appending duplicates).
+nft_mark_accept_pattern() {
+    local mark_hex="$1"
+    echo "meta mark 0x0*${mark_hex#0x} accept"
+}
+
 # Check if running as root or with sudo
 require_root() {
     if [ "$EUID" -ne 0 ]; then
