@@ -113,7 +113,14 @@ TAILSCALE_PREDOWN=""
 
 if ip link show tailscale0 &>/dev/null; then
   echo "Tailscale detected, adding route preservation..."
-  TAILSCALE_POSTUP="PostUp = ip route add 100.64.0.0/10 dev tailscale0"
+  # `route replace`, not `route add`: an unclean VPN shutdown (crash,
+  # kill -9, or a watchdog `wg-quick down` that skips PreDown) can leave
+  # this route in place without PreDown ever running to remove it. `add`
+  # would then fail with "File exists" on the next `wg-quick up`, and
+  # wg-quick treats a failed PostUp hook as fatal, aborting the whole
+  # connection attempt. `replace` succeeds whether the route already
+  # exists or not.
+  TAILSCALE_POSTUP="PostUp = ip route replace 100.64.0.0/10 dev tailscale0"
   TAILSCALE_PREDOWN="PreDown = ip route del 100.64.0.0/10 dev tailscale0 || true"
 else
   echo "Tailscale not detected, skipping Tailscale routes"
