@@ -310,8 +310,10 @@ reapply() {
 # Launch a GUI app as the bypass user. Handles the X11 and audio access
 # grants so the app actually gets a window and can play sound -
 # "sudo -u novpn some-gui-app" on its own will fail/be silent because
-# novpn has neither by default. Run this as your normal user (not root);
-# it does NOT need sudo itself, only the exec inside does.
+# novpn has neither by default. Designed to run unprivileged (only the
+# final exec needs to escalate) but tolerates being invoked via
+# `sudo $0 launch ...` too (see SUDO_UID fallback below) - both are in
+# active use.
 launch() {
     if ! id "$BYPASS_USER" &>/dev/null; then
         echo "Error: bypass user '$BYPASS_USER' doesn't exist yet." >&2
@@ -323,27 +325,47 @@ launch() {
         echo "Example: $0 launch microsoft-edge-stable" >&2
         exit 1
     fi
+    # Real invoking user's UID, not the current EUID - if this whole
+    # command was run via `sudo $0 launch ...` (in active use despite the
+    # design intent above), `id -u` here would be 0 (root), silently
+    # computing a nonexistent /run/user/0 and skipping the grants below
+    # entirely with no error. $SUDO_UID is what sudo itself sets to the
+    # original caller's UID in that case; falls back to `id -u` for a
+    # plain, non-sudo invocation.
+    local real_uid="${SUDO_UID:-$(id -u)}"
+
     # Grant X access by UID over the local socket - no XAUTHORITY juggling needed
     xhost "+SI:localuser:$BYPASS_USER" >/dev/null 2>&1 || true
 
-    # Grant audio access the same way. PipeWire/PulseAudio's socket at
-    # /run/user/<uid>/pulse/native is itself world-rw already, but both
-    # /run/user/<uid> and .../pulse are 0700 (owner-only) - $BYPASS_USER
-    # can't even traverse into them to reach the socket without this,
-    # regardless of the socket's own permissions (symptom: Chromium-based
-    # browsers fall back to raw ALSA and log "PcmOpen: default,Host is
-    # down" - no audio, no error dialog). Execute-only ACL (not read): lets
-    # $BYPASS_USER reach the exact socket path we hand it via PULSE_SERVER
-    # without being able to list what else is in bez's runtime directory.
-    # Ephemeral (an ACL on a tmpfs runtime dir systemd-logind recreates
+    # Grant audio access the same way. The runtime dir housing PipeWire's
+    # sockets (/run/user/<uid>/) is 0700 (owner-only) - $BYPASS_USER can't
+    # traverse into it without this, regardless of the sockets' own
+    # permissions (symptom: Chromium-based browsers fall back to ALSA and
+    # log "PcmOpen: default,Host is down" - no audio, no error dialog).
+    # XDG_RUNTIME_DIR, not a protocol-specific var like PULSE_SERVER:
+    # ALSA's "default" device on this system is itself routed through
+    # PipeWire's *native* socket (/run/user/<uid>/pipewire-0), per
+    # /usr/share/alsa/alsa.conf.d/99-pipewire-default.conf - not the
+    # separate PulseAudio-compatibility socket at .../pulse/native. Both
+    # protocols (and anything else that follows the XDG base-dir spec)
+    # derive their socket path from XDG_RUNTIME_DIR, so overriding that
+    # one variable covers both rather than chasing each protocol's own
+    # override individually. Execute-only ACL (not read): lets
+    # $BYPASS_USER reach specific, already-known socket names without
+    # being able to list what else lives in the real user's runtime
+    # directory. Ephemeral (an ACL on a tmpfs dir systemd-logind recreates
     # every login), same as the xhost grant above - redone on every
     # launch rather than persisted anywhere.
-    local runtime_dir="/run/user/$(id -u)"
+    local runtime_dir="/run/user/$real_uid"
     local env_args=(DISPLAY="${DISPLAY:-:0}")
-    if [ -S "$runtime_dir/pulse/native" ]; then
+    if [ -d "$runtime_dir" ]; then
         setfacl -m "u:$BYPASS_USER:x" "$runtime_dir" 2>/dev/null || true
-        setfacl -m "u:$BYPASS_USER:x" "$runtime_dir/pulse" 2>/dev/null || true
-        env_args+=(PULSE_SERVER="unix:$runtime_dir/pulse/native")
+        # Also covers the separate PulseAudio-compatibility protocol
+        # (.../pulse/native) in case an app's audio library tries that
+        # before falling back to ALSA/native PipeWire - belt and braces,
+        # still execute-only.
+        [ -d "$runtime_dir/pulse" ] && setfacl -m "u:$BYPASS_USER:x" "$runtime_dir/pulse" 2>/dev/null || true
+        env_args+=(XDG_RUNTIME_DIR="$runtime_dir")
     fi
 
     exec sudo -u "$BYPASS_USER" env "${env_args[@]}" "$@"
