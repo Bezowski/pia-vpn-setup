@@ -199,47 +199,81 @@ launch() {
     exec sudo -u "$BYPASS_USER" env DISPLAY="${DISPLAY:-:0}" "$@"
 }
 
-# Self-healing watchdog: tailscaled's netlink route monitor removes our ip
-# rule (confirmed via direct on/off testing - stopping tailscaled makes the
-# rule stay put indefinitely; starting it, the rule is gone within seconds,
-# every time, regardless of whether the rule uses fwmark or uidrange
-# selectors). This is a bug in tailscaled's route cleanup logic, not
-# something fixable from our side.
-#
-# A polling loop checking every few seconds isn't fast enough - once
-# tailscaled deletes the rule, a curl attempt can retry for its entire
-# timeout window (5+ seconds) before the next poll would even notice.
-# Instead, use "ip monitor rule" to react the instant a delete happens,
-# typically within milliseconds - fast enough that it shouldn't cost more
-# than a single dropped packet, if that.
+# Self-healing watchdog. Two independent things get removed by something
+# external, on different schedules:
+#  1. The ip rule - tailscaled's netlink route monitor removes this within
+#     seconds (confirmed via direct on/off testing), regardless of whether
+#     it's a fwmark or uidrange rule. Handled via "ip monitor rule" for
+#     near-instant reaction, since a 2-3s polling gap is enough for a whole
+#     curl attempt to fail before the next check would even notice.
+#  2. The iptables mangle marking rule, the MASQUERADE rule, and the kill
+#     switch's nft exception - these disappear together on a slower, so-far
+#     unidentified trigger (possibly something doing a broader "nft flush"
+#     that also happens to clear the iptables-nft-backed mangle table).
+#     Handled via periodic polling since there's no equivalent event stream
+#     for iptables/nft changes to react to instantly.
 watch() {
-    echo "$(date '+%F %T'): watchdog started (event-driven via ip monitor)"
+    echo "$(date '+%F %T'): watchdog started"
 
     ensure_rule() {
         if ! ip rule show | grep -q "fwmark $BYPASS_MARK lookup $BYPASS_TABLE"; then
             ip rule add fwmark $BYPASS_MARK table $BYPASS_TABLE priority 10 2>/dev/null || true
-            echo "$(date '+%F %T'): rule missing, re-added"
+            echo "$(date '+%F %T'): ip rule missing, re-added"
         fi
     }
 
-    ensure_rule
+    ensure_mangle() {
+        if ! iptables -t mangle -C OUTPUT -m owner --uid-owner "$BYPASS_USER" -j MARK --set-mark $BYPASS_MARK 2>/dev/null; then
+            echo "$(date '+%F %T'): mangle marking missing, re-adding"
+            iptables -t mangle -A OUTPUT -m owner --uid-owner "$BYPASS_USER" -p udp --dport 53 -j RETURN 2>/dev/null || true
+            iptables -t mangle -A OUTPUT -m owner --uid-owner "$BYPASS_USER" -p tcp --dport 53 -j RETURN 2>/dev/null || true
+            iptables -t mangle -A OUTPUT -m owner --uid-owner "$BYPASS_USER" -j MARK --set-mark $BYPASS_MARK 2>/dev/null || true
+        fi
+    }
 
-    # "ip monitor rule" streams every rule add/delete on the system. Filter
-    # for delete events, then re-check regardless of which table was
-    # mentioned (parsing the line reliably across ip/iproute2 versions is
-    # fragile - a redundant check-and-add is cheap and always safe).
-    stdbuf -oL ip monitor rule 2>/dev/null | while read -r line; do
+    ensure_masquerade() {
+        if [ -f "$GATEWAY_FILE" ]; then
+            local iface
+            read -r iface _ < "$GATEWAY_FILE"
+            if [ -n "$iface" ] && ! iptables -t nat -C POSTROUTING -o "$iface" -m mark --mark $BYPASS_MARK -j MASQUERADE 2>/dev/null; then
+                echo "$(date '+%F %T'): MASQUERADE rule missing, re-adding"
+                iptables -t nat -A POSTROUTING -o "$iface" -m mark --mark $BYPASS_MARK -j MASQUERADE 2>/dev/null || true
+            fi
+        fi
+    }
+
+    ensure_killswitch() {
+        if nft list table inet pia_killswitch &>/dev/null; then
+            if ! nft list table inet pia_killswitch | grep -q "$BYPASS_MARK"; then
+                echo "$(date '+%F %T'): kill switch exception missing, re-adding"
+                nft add rule inet pia_killswitch output meta mark $BYPASS_MARK accept 2>/dev/null || true
+            fi
+        fi
+    }
+
+    ensure_all() {
+        ensure_rule
+        ensure_mangle
+        ensure_masquerade
+        ensure_killswitch
+    }
+
+    ensure_all
+
+    # Fast path: react within milliseconds to ip rule deletions specifically
+    ( stdbuf -oL ip monitor rule 2>/dev/null | while read -r line; do
         case "$line" in
             Deleted*) ensure_rule ;;
         esac
-    done
+    done ) &
+    MONITOR_PID=$!
+    trap 'kill $MONITOR_PID 2>/dev/null || true' EXIT
 
-    # If "ip monitor rule" itself ever exits (shouldn't under normal
-    # operation), fall back to polling rather than leaving nothing running.
-    echo "$(date '+%F %T'): ip monitor rule exited unexpectedly, falling back to polling"
+    # Slow path: poll everything (including the ip rule again, as a backstop
+    # in case the monitor subshell above ever dies) every few seconds
     while true; do
-        ensure_rule
-        sleep 2
+        sleep 3
+        ensure_all
     done
 }
 
