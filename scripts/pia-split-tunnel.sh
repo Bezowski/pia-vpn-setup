@@ -307,10 +307,11 @@ reapply() {
     fi
 }
 
-# Launch a GUI app as the bypass user. Handles the X11 access grant so the
-# app actually gets a window - "sudo -u novpn some-gui-app" on its own will
-# fail because novpn has no X access by default. Run this as your normal
-# user (not root); it does NOT need sudo itself, only the exec inside does.
+# Launch a GUI app as the bypass user. Handles the X11 and audio access
+# grants so the app actually gets a window and can play sound -
+# "sudo -u novpn some-gui-app" on its own will fail/be silent because
+# novpn has neither by default. Run this as your normal user (not root);
+# it does NOT need sudo itself, only the exec inside does.
 launch() {
     if ! id "$BYPASS_USER" &>/dev/null; then
         echo "Error: bypass user '$BYPASS_USER' doesn't exist yet." >&2
@@ -324,7 +325,28 @@ launch() {
     fi
     # Grant X access by UID over the local socket - no XAUTHORITY juggling needed
     xhost "+SI:localuser:$BYPASS_USER" >/dev/null 2>&1 || true
-    exec sudo -u "$BYPASS_USER" env DISPLAY="${DISPLAY:-:0}" "$@"
+
+    # Grant audio access the same way. PipeWire/PulseAudio's socket at
+    # /run/user/<uid>/pulse/native is itself world-rw already, but both
+    # /run/user/<uid> and .../pulse are 0700 (owner-only) - $BYPASS_USER
+    # can't even traverse into them to reach the socket without this,
+    # regardless of the socket's own permissions (symptom: Chromium-based
+    # browsers fall back to raw ALSA and log "PcmOpen: default,Host is
+    # down" - no audio, no error dialog). Execute-only ACL (not read): lets
+    # $BYPASS_USER reach the exact socket path we hand it via PULSE_SERVER
+    # without being able to list what else is in bez's runtime directory.
+    # Ephemeral (an ACL on a tmpfs runtime dir systemd-logind recreates
+    # every login), same as the xhost grant above - redone on every
+    # launch rather than persisted anywhere.
+    local runtime_dir="/run/user/$(id -u)"
+    local env_args=(DISPLAY="${DISPLAY:-:0}")
+    if [ -S "$runtime_dir/pulse/native" ]; then
+        setfacl -m "u:$BYPASS_USER:x" "$runtime_dir" 2>/dev/null || true
+        setfacl -m "u:$BYPASS_USER:x" "$runtime_dir/pulse" 2>/dev/null || true
+        env_args+=(PULSE_SERVER="unix:$runtime_dir/pulse/native")
+    fi
+
+    exec sudo -u "$BYPASS_USER" env "${env_args[@]}" "$@"
 }
 
 # Self-healing watchdog.
