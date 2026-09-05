@@ -25,6 +25,43 @@ echo
 echo "Starting uninstallation..."
 echo
 
+# Stop the watchdog and split-tunnel watchdog FIRST, before touching the
+# kill switch or the VPN - otherwise they'll try to "self-heal" the very
+# things this script is about to remove.
+echo "Stopping security-feature services..."
+systemctl stop pia-watchdog.service 2>/dev/null || true
+systemctl stop pia-split-tunnel-watch.service 2>/dev/null || true
+systemctl disable pia-watchdog.service 2>/dev/null || true
+systemctl disable pia-split-tunnel-watch.service 2>/dev/null || true
+rm -f /etc/systemd/system/pia-watchdog.service
+rm -f /etc/systemd/system/pia-split-tunnel-watch.service
+echo "✓ Watchdog services stopped, disabled, and removed"
+
+# Disable the kill switch BEFORE stopping/disconnecting the VPN below -
+# its default-drop policy has no exception for "VPN is down for an
+# uninstall," so doing this in the other order would leave the user with
+# no internet at all for the rest of the uninstall (and until they
+# noticed and disabled it manually). Fall back to a direct nft delete if
+# the script is already gone from a previous partial uninstall attempt.
+echo "Disabling kill switch..."
+if [ -x /usr/local/bin/pia-killswitch.sh ]; then
+    /usr/local/bin/pia-killswitch.sh disable 2>/dev/null || true
+else
+    nft delete table inet pia_killswitch 2>/dev/null || true
+fi
+echo "✓ Kill switch disabled"
+
+# Remove split-tunnel routing rules (ip rule/route table, iptables mangle
+# and MASQUERADE rules) - this intentionally leaves the novpn user itself
+# in place, matching pia-split-tunnel.sh's own teardown command.
+echo "Removing split-tunnel routing rules..."
+if [ -x /usr/local/bin/pia-split-tunnel.sh ]; then
+    /usr/local/bin/pia-split-tunnel.sh teardown 2>/dev/null || true
+    echo "✓ Split-tunnel routing rules removed (novpn user left in place)"
+else
+    echo "  (pia-split-tunnel.sh not installed, skipping)"
+fi
+
 # Stop services
 echo "Stopping services..."
 systemctl stop pia-vpn.service 2>/dev/null || true
@@ -69,27 +106,49 @@ rm -f /usr/local/bin/pia-suspend-handler.sh
 rm -f /usr/local/bin/update-firewall-for-port.sh
 rm -f /usr/local/bin/pia-firewall-update-wrapper.sh
 rm -f /usr/local/bin/pia-port-forward-wrapper.sh
+rm -f /usr/local/bin/pia-killswitch.sh
+rm -f /usr/local/bin/pia-watchdog.sh
+rm -f /usr/local/bin/pia-split-tunnel.sh
+rm -f /usr/local/bin/pia-set-credential.sh
+rm -f /usr/local/bin/pia-metrics.sh
+rm -f /usr/local/bin/pia-stats.sh
+rm -f /usr/local/bin/pia-health-check.sh
+rm -f /usr/local/bin/pia-common.sh
 rm -rf /usr/local/bin/manual-connections
 echo "✓ Scripts removed"
 
-# Remove Cinnamon applet
+# Remove Cinnamon applet. install.sh installs this per-user, under the
+# real (non-root) user's home directory - not the system-wide
+# /usr/share/cinnamon/applets path this step used to target, which
+# install.sh never actually writes to (so that rm was always a no-op).
 echo "Removing Cinnamon applet..."
-rm -rf /usr/share/cinnamon/applets/pia-vpn@bezowski
-echo "✓ Cinnamon applet removed"
+if [ -n "${SUDO_USER:-}" ]; then
+    REAL_USER="$SUDO_USER"
+else
+    REAL_USER=$(who | awk '{print $1}' | grep -v root | head -n1)
+fi
+if [ -n "$REAL_USER" ]; then
+    REAL_USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+    rm -rf "$REAL_USER_HOME/.local/share/cinnamon/applets/pia-vpn@bezowski"
+    echo "✓ Cinnamon applet removed"
+else
+    echo "⚠️  Could not detect non-root user, skipping applet removal"
+    echo "  Remove manually: rm -rf ~/.local/share/cinnamon/applets/pia-vpn@bezowski"
+fi
 
 # Remove sudoers file
 echo "Removing sudoers configuration..."
 rm -f /etc/sudoers.d/pia-vpn
 echo "✓ Sudoers configuration removed"
 
-# Clean up persistence directory
+# Clean up persistence directory. Removed wholesale rather than an
+# enumerated per-file list - /var/lib/pia is entirely owned by this
+# project's own scripts (per README's File Locations section), and a
+# hardcoded list of "known" files here would only drift out of sync as
+# new state/cache/lock files get added elsewhere in the codebase, leaving
+# an incomplete, silently-partial cleanup instead of an obvious error.
 echo "Cleaning up data files..."
-rm -f /var/lib/pia/token.txt
-rm -f /var/lib/pia/token.txt.with-expiry
-rm -f /var/lib/pia/forwarded_port
-rm -f /var/lib/pia/region.txt
-rm -f /var/lib/pia/current-region.txt
-rmdir /var/lib/pia 2>/dev/null || true
+rm -rf /var/lib/pia
 echo "✓ Data files removed"
 
 # Remove firewall rules

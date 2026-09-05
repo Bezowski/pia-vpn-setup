@@ -87,7 +87,12 @@ if [ -z "$REAL_USER" ]; then
     echo "⚠️  Could not detect non-root user, skipping applet installation"
     echo "To install manually: cp -r applet/ ~/.local/share/cinnamon/applets/pia-vpn@bezowski/"
 else
-    REAL_USER_HOME=$(eval echo ~$REAL_USER)
+    # getent, not `eval echo ~$REAL_USER` - eval on a value derived from
+    # `who`/$SUDO_USER is an unquoted-input-into-eval pattern that's
+    # fragile at best (breaks on usernames with spaces or shell
+    # metacharacters) and unsafe in principle even though exploiting it
+    # here would need control over an OS username.
+    REAL_USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
     APPLET_DIR="$REAL_USER_HOME/.local/share/cinnamon/applets/pia-vpn@bezowski"
     
     mkdir -p "$APPLET_DIR/icons"
@@ -262,7 +267,7 @@ echo "To install these features:"
 echo "  sudo ./install-security-features.sh"
 echo
 if [ -n "$REAL_USER" ]; then
-    REAL_USER_HOME=$(eval echo ~$REAL_USER)
+    REAL_USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
     echo "Applet location: $REAL_USER_HOME/.local/share/cinnamon/applets/pia-vpn@bezowski"
 else
     echo "Applet not installed (could not detect user)"
