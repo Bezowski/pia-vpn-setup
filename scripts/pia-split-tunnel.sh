@@ -11,17 +11,32 @@ source "$(dirname "${BASH_SOURCE[0]}")/pia-common.sh"
 
 BYPASS_TABLE=200
 BYPASS_MARK="0x200"
-# Must beat wg-quick's own auto-added rules (observed at priority 8: "from
-# all lookup main suppress_prefixlength 0", and priority 9: "not fwmark
-# ... lookup 51820"). Priority 8's suppress_prefixlength 0 only suppresses
-# a match against the literal 0.0.0.0/0 route; wg-quick's two /1 split-
-# default routes (0.0.0.0/1 + 128.0.0.0/1, both via the VPN interface) have
-# prefix length 1 and are NOT suppressed, so they match every destination
-# and win the lookup before our rule is ever reached - regardless of
-# fwmark - unless ours has a lower priority number. 1 is the lowest
-# available slot after "from all lookup local" (priority 0, must stay
-# first). wg-quick's auto-assigned priorities aren't guaranteed to stay at
-# 8/9 forever, but nothing legitimate needs 1-7, so this leaves headroom.
+# Must beat wg-quick's own auto-added rules ("from all lookup main
+# suppress_prefixlength 0", and "not fwmark ... lookup <table>"). The
+# suppress_prefixlength 0 one only suppresses a match against the literal
+# 0.0.0.0/0 route; wg-quick's two /1 split-default routes (0.0.0.0/1 +
+# 128.0.0.0/1, both via the VPN interface) have prefix length 1 and are
+# NOT suppressed, so they match every destination and win the lookup
+# before our rule is ever reached - regardless of fwmark - unless ours
+# has a lower priority number.
+#
+# wg-quick's auto-assigned priority for these is NOT stable: observed at
+# 8/9 early on, then later at 0 (the literal floor - priority is an
+# unsigned field, nothing is lower) in the same running system. Matching
+# or beating that isn't reliably possible by picking a number: ties at
+# the same priority are resolved by insertion order, not by which side
+# "deserves" precedence, and wg-quick's rules are always inserted before
+# ours chronologically (wg-quick brings up the interface, including
+# these rules, before our own ExecStartPost-triggered setup ever runs) -
+# confirmed by direct testing: adding our own rule at priority 0 landed
+# it *after* wg-quick's existing priority-0 rules, still losing.
+#
+# So this constant is a floor for OUR rule (1 is the lowest slot after
+# "from all lookup local" at priority 0, which must stay first) but the
+# actual guarantee comes from relocate_wg_rules_if_conflicting() below,
+# which actively moves wg-quick's rules to a safe, higher priority
+# whenever they're found at or below this one - fighting over a lower
+# number of our own isn't a solvable strategy once wg-quick can reach 0.
 BYPASS_RULE_PRIORITY=1
 BYPASS_USER="${PIA_BYPASS_USER:-novpn}"
 STATE_DIR="/var/lib/pia"
@@ -57,6 +72,42 @@ del_bypass_rule() {
 # as already present). Resolve to the UID once and grep for that instead.
 bypass_uid() {
     id -u "$BYPASS_USER" 2>/dev/null
+}
+
+# See BYPASS_RULE_PRIORITY's comment above for why this exists instead of
+# just picking a lower priority number for our own rule. Scans for
+# wg-quick's two auto-added rule types at or below our priority and
+# relocates each to WG_SAFE_PRIORITY (comfortably above ours, comfortably
+# below Tailscale's own rules in the 5210+ range) - deterministic because
+# we control where THEY end up, unlike trying to control where OUR rule
+# lands relative to an auto-assigned number we don't choose.
+WG_SAFE_PRIORITY=100
+relocate_wg_rules_if_conflicting() {
+    local line prio moved=false
+    while IFS= read -r line; do
+        prio=$(echo "$line" | awk -F: '{print $1}' | tr -d ' ')
+        [[ "$prio" =~ ^[0-9]+$ ]] || continue
+        [ "$prio" -gt "$BYPASS_RULE_PRIORITY" ] && continue
+
+        if echo "$line" | grep -q "lookup main suppress_prefixlength 0"; then
+            while ip rule del lookup main suppress_prefixlength 0 2>/dev/null; do :; done
+            ip rule add lookup main suppress_prefixlength 0 priority $WG_SAFE_PRIORITY 2>/dev/null || true
+            moved=true
+        elif echo "$line" | grep -q "not from all fwmark"; then
+            local mark table
+            mark=$(echo "$line" | grep -oP 'not from all fwmark \K\S+')
+            table=$(echo "$line" | grep -oP 'lookup \K\S+')
+            if [ -n "$mark" ] && [ -n "$table" ]; then
+                while ip rule del not fwmark "$mark" lookup "$table" 2>/dev/null; do :; done
+                ip rule add not fwmark "$mark" lookup "$table" priority $WG_SAFE_PRIORITY 2>/dev/null || true
+                moved=true
+            fi
+        fi
+    done < <(ip rule show | grep -E "lookup main suppress_prefixlength 0|not from all fwmark")
+
+    if [ "$moved" = true ]; then
+        echo "$(date '+%F %T'): wg-quick rule(s) found at/below priority $BYPASS_RULE_PRIORITY, relocated to $WG_SAFE_PRIORITY"
+    fi
 }
 
 # Adds the kill switch bypass exception if it's missing, under a file lock
@@ -146,6 +197,7 @@ setup() {
     # this.
     del_bypass_rule
     ip rule add fwmark $BYPASS_MARK table $BYPASS_TABLE priority $BYPASS_RULE_PRIORITY
+    relocate_wg_rules_if_conflicting
 
     # Mark all traffic from the bypass user EXCEPT DNS.
     # DNS is exempted from the mark: PIA's DNS server (10.0.0.243) is only
@@ -301,6 +353,14 @@ watch() {
     echo "$(date '+%F %T'): watchdog started"
 
     ensure_rule() {
+        # Checked unconditionally, not just when our own rule is missing:
+        # wg-quick's conflicting rule can reappear at a bad priority even
+        # while ours is present and correct - both coexist, and wg-quick's
+        # still wins the lookup regardless of our rule being fine. See
+        # BYPASS_RULE_PRIORITY's comment for why this is the actual fix,
+        # not a fallback.
+        relocate_wg_rules_if_conflicting
+
         if ! ip rule show | grep -q "^${BYPASS_RULE_PRIORITY}:.*fwmark $BYPASS_MARK lookup $BYPASS_TABLE"; then
             # Clean up any stale copy at the wrong priority first (e.g. left
             # over from before BYPASS_RULE_PRIORITY was fixed to beat
