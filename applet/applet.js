@@ -427,7 +427,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     check_vpn_status() {
         try {
             let [success, out] = GLib.spawn_command_line_sync('ip addr show pia');
-            this.is_connected = success && out.toString().indexOf("inet ") !== -1;
+            this.is_connected = success && imports.byteArray.toString(out).indexOf("inet ") !== -1;
         } catch(e) {
             this.logError("Failed to check VPN status", e);
             this.is_connected = false;
