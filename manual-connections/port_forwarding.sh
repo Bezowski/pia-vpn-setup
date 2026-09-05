@@ -90,11 +90,14 @@ write_port_file() {
   local port=$1
   local expires_at=$2
   
-  # Strip nanoseconds from ISO8601 format if present
-  local expires_at_clean="${expires_at%.*}Z"
-  
+  # GNU date already parses ISO8601 timestamps directly, with or without
+  # a fractional-seconds component - no need to strip it first. (A
+  # previous version did `"${expires_at%.*}Z"`, which assumed a '.' was
+  # always present; if PIA's API ever omitted the fractional seconds,
+  # that produced a malformed "...ZZ" string that `date -d` can't parse,
+  # silently falling back to the hardcoded 60-day estimate below.)
   local EXPIRY_UNIX
-  if EXPIRY_UNIX=$(/bin/date -d "$expires_at_clean" +%s 2>/dev/null); then
+  if EXPIRY_UNIX=$(/bin/date -d "$expires_at" +%s 2>/dev/null); then
     :
   else
     # Fallback: port expires in ~60 days (2 months)

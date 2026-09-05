@@ -85,10 +85,16 @@ echo "  Token:    ${PIA_TOKEN:0:20}... ($(echo -n "$PIA_TOKEN" | wc -c) chars)"
 # Export for port_forwarding.sh
 export PF_HOSTNAME PF_GATEWAY PIA_TOKEN
 
-# Delete old port file to force fresh assignment
-# This ensures we get a new port when the service restarts
+# Delete the old port file so consumers waiting on it (e.g.
+# update-firewall-for-port.sh) see it disappear and reappear rather than
+# reading a stale value. This does NOT force a new port number:
+# port_forwarding.sh reuses the cached payload/signature (and therefore
+# the same port) if it's still fresh (<2h old, not expired) - that's
+# intentional, so suspend/resume and service restarts don't need a new
+# PIA signature every time. A genuinely new port is only assigned if the
+# cached signature has actually gone stale.
 rm -f "$PERSIST_DIR/forwarded_port"
-echo "Deleted old port file (forcing fresh port assignment)"
+echo "Deleted old port file (port_forwarding.sh will reuse the existing port if its signature is still fresh, or assign a new one otherwise)"
 
 # Verify we can access the PIA certificate
 CERT_PATH="/usr/local/bin/manual-connections/ca.rsa.4096.crt"

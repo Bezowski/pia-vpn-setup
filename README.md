@@ -7,7 +7,7 @@ Automated PIA VPN setup with WireGuard, port forwarding, and systemd integration
 * ✅ Automatic VPN connection on boot (fastest region or selected region)
 * ✅ Token renewal every 23 hours (silent, no VPN disconnection)
 * ✅ Automatic port forwarding with firewall updates
-* ✅ Survives suspend/resume with fresh port assignment
+* ✅ Survives suspend/resume with automatic port forwarding recovery
 * ✅ Comprehensive metrics logging and analysis
 * ✅ Health check script with detailed diagnostics
 * ✅ **Cinnamon applet for easy server selection and VPN management**
@@ -307,8 +307,9 @@ journalctl -u pia-suspend.service -f
 **After suspend/resume:**
 The system automatically handles suspend/resume:
 - Port forwarding service is stopped on suspend
-- Fresh port is requested on resume
-- New port is automatically configured in firewall
+- Port forwarding is reconfirmed on resume (reusing the same port if the
+  cached signature is still fresh, or getting a new one otherwise)
+- The firewall is automatically updated to match whatever port is active
 
 ### Manual Testing
 

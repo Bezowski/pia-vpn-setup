@@ -1,6 +1,10 @@
 #!/bin/bash
 # Handle PIA VPN on suspend/resume
-# Strategy: Always get fresh port on resume by restarting port-forward service
+# Strategy: Always restart port-forward service on resume, to reconfirm
+# port forwarding after the network interruption. This reuses the same
+# port if the cached signature is still fresh (intentional - see
+# restart_port_forwarding() below), or gets a genuinely new port only if
+# the signature has gone stale.
 
 set -euo pipefail
 
@@ -119,36 +123,43 @@ test_vpn_connectivity() {
   return 0
 }
 
-# Helper function: Restart port forwarding with fresh port
+# Helper function: Restart port forwarding after resume
 restart_port_forwarding() {
-  echo "Restarting port forwarding to get fresh port..."
-  
+  echo "Restarting port forwarding after resume..."
+
   # Stop the service completely (kills the long-running script)
   echo "  Stopping pia-port-forward.service..."
   systemctl stop pia-port-forward.service 2>/dev/null || true
   sleep 2
-  
-  # Delete old port file to force fresh assignment
+
+  # Delete the old port file so the wait loop below can tell when
+  # port_forwarding.sh has re-run, rather than reading a stale value left
+  # over from before suspend. This does NOT force a new port number:
+  # port_forwarding.sh reuses the cached signature (and same port) if
+  # it's still fresh (<2h old) - intentional, so suspend/resume doesn't
+  # need a new PIA signature every time. A genuinely new port only gets
+  # assigned if the cached signature has gone stale.
   if [ -f /var/lib/pia/forwarded_port ]; then
     rm -f /var/lib/pia/forwarded_port
     echo "  Deleted old port file"
   fi
-  
-  # Start the service (will get new signature and port)
+
+  # Start the service (will reuse the port if the signature is still
+  # fresh, or get a new signature and port otherwise)
   echo "  Starting pia-port-forward.service..."
   systemctl start pia-port-forward.service 2>/dev/null || {
     echo "✗ Failed to start port forwarding service"
     return 1
   }
-  
-  # Wait for new port to be assigned (max 45 seconds)
+
+  # Wait for the port file to reappear (max 45 seconds)
   local port_wait=0
   echo "  Waiting for port assignment (max 45s)..."
   while [ $port_wait -lt 45 ]; do
     if [ -f /var/lib/pia/forwarded_port ]; then
       local new_port=$(awk '{print $1}' /var/lib/pia/forwarded_port 2>/dev/null || echo "")
       if [ -n "$new_port" ] && [ "$new_port" != "0" ]; then
-        echo "✅ Got fresh forwarded port: $new_port"
+        echo "✅ Port forwarding confirmed: $new_port"
         return 0
       fi
     fi
@@ -264,12 +275,15 @@ case "${1:-}" in
       fi
       
       if [ "$PIA_PF_SETTING" = "true" ]; then
-        # CRITICAL: After suspend, we MUST restart port-forward service
-        # The old signature is stale, we need a fresh one
-        echo "Port forwarding enabled, getting fresh port after resume..."
-        
+        # After suspend, restart port-forward service to reconfirm port
+        # forwarding is bound after the network interruption. The cached
+        # signature is reused (same port) if it's still fresh - see
+        # restart_port_forwarding()'s own comment - so this is not
+        # guaranteed to be a new port, just a confirmed one.
+        echo "Port forwarding enabled, reconfirming port after resume..."
+
         if restart_port_forwarding; then
-          echo "✅ Resume complete - VPN healthy, fresh port assigned"
+          echo "✅ Resume complete - VPN healthy, port forwarding confirmed"
           NEW_PORT=$(awk '{print $1}' /var/lib/pia/forwarded_port 2>/dev/null || echo "Unknown")
           log_metric log-resume "$NEW_PORT"
         else
