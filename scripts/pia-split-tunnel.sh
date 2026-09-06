@@ -366,7 +366,15 @@ launch() {
     # still checks the target path's own permissions, a symlink doesn't
     # bypass that.
     local runtime_dir="/run/user/$real_uid"
-    local env_args=(DISPLAY="${DISPLAY:-:0}")
+    # This GPU's hardware video decoder (Kepler-generation NVDEC) only
+    # supports H.264/MPEG/VC1 - no VP9/AV1. Without a working Nvidia VAAPI
+    # backend (nvidia-vaapi-driver), Chromium-based browsers can't correctly
+    # negotiate that limit and instead crash mid-stream on sites that serve
+    # VP9 (e.g. Twitch), surfacing as a decode error that only clears on a
+    # full browser restart. Forcing the driver name here makes VAAPI queries
+    # resolve correctly, so unsupported codecs cleanly fall back to software
+    # decode instead of crashing.
+    local env_args=(DISPLAY="${DISPLAY:-:0}" LIBVA_DRIVER_NAME=nvidia)
     if [ -d "$runtime_dir" ]; then
         setfacl -m "u:$BYPASS_USER:x" "$runtime_dir" 2>/dev/null || true
         [ -d "$runtime_dir/pulse" ] && setfacl -m "u:$BYPASS_USER:x" "$runtime_dir/pulse" 2>/dev/null || true
