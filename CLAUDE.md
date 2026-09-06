@@ -31,7 +31,7 @@ Automated PIA VPN setup for Linux (WireGuard + systemd), tested on Linux Mint 22
 - Persistence: `pia-vpn.service`'s `ExecStartPost` calls `pia-split-tunnel.sh reapply` on every connect/reconnect (no-op if split tunneling was never configured).
 - Self-healing watchdog: `pia-split-tunnel-watch.service` runs `pia-split-tunnel.sh watch`.
 - **Known external bug (not fixable from this project):** tailscaled's netlink route monitor deletes custom `ip rule`s it doesn't recognize, regardless of `uidrange`/`fwmark` selector — confirmed via on/off testing (stopping `tailscaled` makes the rule stay put indefinitely; starting it, the rule is deleted within seconds, every time). `tailscale set --netfilter-mode=off` was tried and made no difference, which confirms it's the route *monitor*, not iptables/nft management. The watchdog uses `ip monitor rule` for near-instant reaction to this, plus polling for the mangle mark / MASQUERADE / killswitch pieces.
-- `applet/microsoft-edge-novpn.desktop` — desktop launcher for Edge via the bypass.
+- `applet/microsoft-edge-novpn.desktop` — desktop launcher for Edge via the bypass. Its `Exec=` calls `sudo -n pia-split-tunnel.sh launch ...`; this silently does nothing without a matching `NOPASSWD: /usr/local/bin/pia-split-tunnel.sh launch *` sudoers rule, which none of the installer scripts set up yet (see README's "Desktop launcher" section under Split Tunneling).
 
 ## Working conventions
 - When editing or creating files interactively via a terminal command, use `xed`, not `nano` (matches the project's own documented usage, e.g. `sudo xed /etc/pia-credentials` in README)

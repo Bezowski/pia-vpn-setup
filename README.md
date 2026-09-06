@@ -175,6 +175,26 @@ xhost +SI:localuser:novpn
 sudo -u novpn env DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY firefox
 ```
 
+`pia-split-tunnel.sh launch <cmd>` wraps all of this (X access, audio-socket sharing, `novpn`'s own XDG runtime dir) for you — see `applet/microsoft-edge-novpn.desktop` for a ready-made example that launches Edge outside the tunnel.
+
+### Desktop launcher (GUI shortcut)
+
+To add a menu shortcut like the bundled Edge one:
+
+```bash
+cp applet/microsoft-edge-novpn.desktop ~/.local/share/applications/
+```
+
+Its `Exec=` line calls `sudo -n pia-split-tunnel.sh launch ...` — the `-n` means it fails silently (no error dialog) instead of hanging on a password prompt, since a desktop launcher has no terminal to type one into. That only works with a matching NOPASSWD sudoers rule, which isn't installed by any of the installer scripts yet (split tunneling as a whole is set up manually, not via `install.sh`). Add one per app you want to launch this way:
+
+```bash
+echo 'YOUR_USERNAME ALL=(root) NOPASSWD: /usr/local/bin/pia-split-tunnel.sh launch *' | sudo tee /etc/sudoers.d/pia-split-tunnel-launch
+sudo chmod 0440 /etc/sudoers.d/pia-split-tunnel-launch
+sudo visudo -cf /etc/sudoers.d/pia-split-tunnel-launch   # should print "parsed OK"
+```
+
+Without this, clicking the shortcut does nothing visible — `launch()`'s internal `sudo -u novpn` call just fails with "a password is required" and there's no terminal to show it.
+
 ### Status and teardown
 
 ```bash
