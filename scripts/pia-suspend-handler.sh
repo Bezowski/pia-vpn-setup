@@ -264,7 +264,23 @@ case "${1:-}" in
     echo "Testing VPN connectivity..."
     if test_vpn_connectivity; then
       echo "✓ VPN connectivity is good"
-      
+
+      # The VPN interface surviving suspend (this branch) skips
+      # pia-vpn.service entirely, so its ExecStartPost=pia-split-tunnel.sh
+      # reapply never runs here - unlike the reconnect_vpn() fallback below,
+      # which goes through pia-vpn.service and gets it for free. Without
+      # this, novpn's bypass routing table keeps pointing at whatever
+      # physical gateway was current before suspend: harmless if it's
+      # unchanged, but a silent blackhole for bypass traffic if Wi-Fi
+      # reassociated with a new gateway/lease on resume, since nothing else
+      # re-detects and rewrites it. `-` equivalent (|| true) since split
+      # tunneling may never have been configured on this machine, and a
+      # resume failure here shouldn't fail the whole handler.
+      if [ -x /usr/local/bin/pia-split-tunnel.sh ]; then
+        echo "Reapplying split-tunnel bypass routing after resume..."
+        /usr/local/bin/pia-split-tunnel.sh reapply || echo "⚠️ Split-tunnel reapply failed (non-fatal)"
+      fi
+
       # Check if port forwarding is enabled
       CRED_FILE="/etc/pia-credentials"
       PIA_PF_SETTING="false"
