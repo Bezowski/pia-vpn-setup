@@ -365,6 +365,12 @@ launch() {
     # even with the symlinks in place: resolving a symlink to connect()
     # still checks the target path's own permissions, a symlink doesn't
     # bypass that.
+    #
+    # These ACLs don't stay applied: pipewire-pulse periodically chmod()s
+    # its socket dir, which zeroes the ACL mask and silently disables the
+    # grant (symptom: bypass browser audio dies on unpause with a media
+    # pipeline / "Error #3000" failure). pia-split-tunnel-watch re-asserts
+    # it every poll - see ensure_audio_acl() in watch().
     local runtime_dir="/run/user/$real_uid"
     # This GPU's hardware video decoder (Kepler-generation NVDEC) only
     # supports H.264/MPEG/VC1 - no VP9/AV1. Without a working Nvidia VAAPI
@@ -414,6 +420,19 @@ launch() {
 #     seen so far), so they're checked on the same poll as a backstop.
 #     Handled via periodic polling since there's no equivalent event stream
 #     for iptables/nft changes to react to instantly.
+#  3. The POSIX ACL that lets $BYPASS_USER reach the real user's
+#     PulseAudio socket dir (granted in launch()) does not stay put:
+#     pipewire-pulse chmod()s that dir back to 0700 on a new client
+#     connection (e.g. VLC), an audio device hotplug, resume from suspend,
+#     or a daemon restart, and a chmod on an ACL-bearing path silently
+#     collapses the ACL mask to the new (empty) group bits - nullifying
+#     the "user:<BYPASS_USER>:x" entry without removing it (getfacl then
+#     shows "#effective:---"). A bypass browser then can't (re)open its
+#     audio output stream and its whole media pipeline aborts
+#     (PipelineStatus::AUDIO_RENDERER_ERROR; Twitch surfaces this as the
+#     generic "Error #3000"), usually right after an unpause since
+#     Chromium tears down idle audio streams. Polled like item 2 - a
+#     chmod/setfacl leaves no event stream to react to.
 #  Note: an earlier version of ensure_killswitch() below matched the mark
 #  with a plain `grep "$BYPASS_MARK"` (e.g. "0x200"), but nft normalizes
 #  mark values to zero-padded hex when printing (e.g. "0x00000200"), which
@@ -495,11 +514,51 @@ watch() {
         fi
     }
 
+    # See item 3 in this function's header comment for the full story.
+    # setfacl -m without an explicit mask recalculates the mask to
+    # re-include the entry, so simply re-applying the same grant launch()
+    # made is the fix.
+    ensure_audio_acl() {
+        # Nothing running as the bypass user -> nothing consuming audio to
+        # heal, and the runtime dirs may not exist. Also keeps this silent
+        # on machines that never use `launch`.
+        pgrep -u "$BYPASS_USER" >/dev/null 2>&1 || return 0
+
+        # launch() symlinks <bypass runtime>/pulse/native at the real
+        # user's copy; follow it back to learn which /run/user/<uid> to
+        # fix, rather than guessing the real user's UID from a watchdog
+        # with no session context. No symlink -> launch() never wired
+        # audio up here, so there's nothing to maintain.
+        local bypass_native real_pulse_dir real_rt acl_line eff
+        bypass_native="/run/user/$(bypass_uid)/pulse/native"
+        [ -L "$bypass_native" ] || return 0
+        real_pulse_dir=$(readlink -f "$bypass_native" 2>/dev/null) || return 0
+        real_pulse_dir="${real_pulse_dir%/native}"
+        [ -n "$real_pulse_dir" ] && [ -d "$real_pulse_dir" ] || return 0
+        real_rt="${real_pulse_dir%/pulse}"
+
+        # The last colon-field of the entry line is its *effective* perms:
+        # getfacl appends "#effective:XXX" only when the mask clamps the
+        # entry, and XXX is that clamped value; with no clamp the perms
+        # field is itself effective and is the last field. So "no x in the
+        # last field" == "$BYPASS_USER cannot search this dir", whether
+        # the entry is merely masked or missing entirely.
+        acl_line=$(getfacl -p --omit-header -- "$real_pulse_dir" 2>/dev/null \
+            | grep -m1 "^user:$BYPASS_USER:") || true
+        eff="${acl_line##*:}"
+        if [ -z "$acl_line" ] || [[ "$eff" != *x* ]]; then
+            setfacl -m "u:$BYPASS_USER:x" "$real_pulse_dir" 2>/dev/null || true
+            [ -d "$real_rt" ] && setfacl -m "u:$BYPASS_USER:x" "$real_rt" 2>/dev/null || true
+            echo "$(date '+%F %T'): audio ACL for $BYPASS_USER lost on $real_pulse_dir (pipewire-pulse reset the mask), re-applied"
+        fi
+    }
+
     ensure_all() {
         ensure_rule
         ensure_mangle
         ensure_masquerade
         ensure_killswitch
+        ensure_audio_acl
     }
 
     ensure_all
