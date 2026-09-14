@@ -123,8 +123,12 @@ recover_vpn() {
     if nft list table inet pia_killswitch &>/dev/null; then
         log "Kill switch is on, temporarily disabling for reconnect..."
         killswitch_was_on=true
-        /usr/local/bin/pia-killswitch.sh disable
+        # Written before disable, not after: if the watchdog dies between
+        # these two calls, the flag must already exist so
+        # maybe_reenable_killswitch() still knows to turn it back on after
+        # a restart, even though disable() itself hasn't run yet.
         touch "$KILLSWITCH_WATCHDOG_FLAG"
+        /usr/local/bin/pia-killswitch.sh disable
         sleep 2
     fi
     

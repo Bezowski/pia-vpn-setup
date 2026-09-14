@@ -19,11 +19,11 @@ if [ "$PIA_PF" != "true" ]; then
   exit 0
 fi
 
-# Read region data (hostname and gateway saved by pia-renew-and-connect.sh)
+# Read region data (hostname and gateway saved by pia-renew-and-connect-no-pf.sh)
 if [ ! -s "$PERSIST_DIR/region.txt" ]; then
     echo "Error: No region data found at $PERSIST_DIR/region.txt" >&2
     echo "This usually means the VPN hasn't connected yet." >&2
-    echo "Run pia-renew-and-connect.sh first or wait for pia-vpn.service to start." >&2
+    echo "Run pia-renew-and-connect-no-pf.sh first or wait for pia-vpn.service to start." >&2
     exit 1
 fi
 
@@ -64,7 +64,7 @@ echo "  Gateway:  $PF_GATEWAY"
 # Read and export token
 if [ ! -f "$PERSIST_DIR/token.txt" ]; then
     echo "Error: No token found at $PERSIST_DIR/token.txt" >&2
-    echo "Token file is missing. This should have been created by pia-renew-and-connect.sh" >&2
+    echo "Token file is missing. This should have been created by pia-renew-and-connect-no-pf.sh" >&2
     exit 1
 fi
 

@@ -83,7 +83,13 @@ wait_for_network() {
             echo "$(date): ✓ Network is ready (after ${wait_count}s)"
             return 0
         fi
-        
+
+        # Fallback: any interface (other than lo) with a global IP counts too
+        if ip addr show | grep -q "inet.*scope global"; then
+            echo "$(date): ✓ Network interface has IP (after ${wait_count}s)"
+            return 0
+        fi
+
         sleep 1
         wait_count=$((wait_count + 1))
     done
@@ -116,23 +122,39 @@ wait_for_vpn_interface() {
 # Test VPN connectivity
 test_vpn_connectivity() {
     echo "$(date): Testing VPN connectivity..."
-    
+
     # Test 1: Can we reach PIA DNS server?
     if timeout 5 bash -c 'echo > /dev/tcp/10.0.0.243/53' 2>/dev/null; then
         echo "$(date): ✓ PIA DNS server responding"
-        
-        # Test 2: Can we reach external DNS through VPN?
-        if timeout 5 bash -c 'echo > /dev/tcp/1.1.1.1/53' 2>/dev/null; then
-            echo "$(date): ✓ External connectivity through VPN working"
-            return 0
-        else
-            echo "$(date): ✗ Cannot reach external DNS"
-            return 1
-        fi
     else
         echo "$(date): ✗ PIA DNS server not responding"
         return 1
     fi
+
+    # Test 2: Can we reach external DNS through VPN?
+    if timeout 5 bash -c 'echo > /dev/tcp/1.1.1.1/53' 2>/dev/null; then
+        echo "$(date): ✓ External connectivity through VPN working"
+    else
+        echo "$(date): ✗ Cannot reach external DNS"
+        return 1
+    fi
+
+    # Test 3: Can we resolve a domain? (informational only, doesn't fail the check)
+    if timeout 5 nslookup google.com >/dev/null 2>&1; then
+        echo "$(date): ✓ DNS resolution working"
+    else
+        echo "$(date): ⚠️  DNS resolution test failed (but connectivity OK)"
+    fi
+
+    # Test 4: Check public IP to verify we're on VPN (informational only)
+    local public_ip=$(timeout 5 curl -s https://api.ipify.org 2>/dev/null || echo "")
+    if [ -n "$public_ip" ]; then
+        echo "$(date): ✓ Public IP: $public_ip (verify this is a PIA IP)"
+    else
+        echo "$(date): ⚠️  Could not determine public IP"
+    fi
+
+    return 0
 }
 
 # Generic retry function

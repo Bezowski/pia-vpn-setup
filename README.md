@@ -116,8 +116,9 @@ sudo ./install-security-features.sh
 This will:
 1. Install kill switch script (`pia-killswitch.sh`)
 2. Install watchdog script and service (`pia-watchdog.sh`)
-3. Optionally enable kill switch (blocks non-VPN traffic)
-4. Optionally enable watchdog service (auto-recovery)
+3. Configure sudoers (via `install-secure-sudoers.sh`) so the applet's kill switch and watchdog controls work without a password prompt
+4. Optionally enable kill switch (blocks non-VPN traffic)
+5. Optionally enable watchdog service (auto-recovery)
 
 ### Kill Switch Commands
 ```bash

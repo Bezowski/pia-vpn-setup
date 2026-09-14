@@ -4,10 +4,7 @@
 
 set -euo pipefail
 
-# Metrics logging wrapper
-log_metric() {
-    /usr/local/bin/pia-metrics.sh "$@" 2>/dev/null || true
-}
+source "$(dirname "${BASH_SOURCE[0]}")/pia-common.sh"
 
 CRED_FILE="/etc/pia-credentials"
 PERSIST_DIR=/var/lib/pia

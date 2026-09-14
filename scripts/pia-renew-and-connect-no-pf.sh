@@ -2,10 +2,7 @@
 # Connect to PIA VPN on boot, testing all regions to find the fastest
 set -euo pipefail
 
-# Metrics logging wrapper
-log_metric() {
-    /usr/local/bin/pia-metrics.sh "$@" 2>/dev/null || true
-}
+source "$(dirname "${BASH_SOURCE[0]}")/pia-common.sh"
 
 LOCKFILE=/var/lock/pia-renew-and-connect.lock
 mkdir -p /var/lock

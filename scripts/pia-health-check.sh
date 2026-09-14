@@ -268,7 +268,7 @@ check_port_forwarding() {
             print_info "Testing if port $port is open (this takes a few seconds)..."
             local port_test=$(curl -s --max-time 10 "https://www.slsknet.org/porttest.php?port=$port" | grep -oP 'Port: \d+/tcp \K[A-Z]+' || echo "UNKNOWN")
             
-            if [ "$port_test" = "open" ]; then
+            if [ "$port_test" = "OPEN" ]; then
                 print_pass "Port $port is OPEN and accessible from the internet"
             elif [ "$port_test" = "CLOSED" ]; then
                 print_fail "Port $port is CLOSED"

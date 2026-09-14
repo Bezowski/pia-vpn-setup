@@ -775,60 +775,10 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                     
                     if (exists) {
                         global.log("[PIA VPN Applet] Re-enabling kill switch after reconnect");
-                        
-                        // Helper function to check if VPN interface exists
-                        let tryEnableKillswitch = (attempt) => {
-                            if (exists) {
-                                global.log("[PIA VPN Applet] Re-enabling kill switch after reconnect");
-                                
-                                // Start trying to enable kill switch after 2 seconds
-                                Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
-                                    this._enableKillswitchWhenReady(1);
-                                    return false;
-                                }));
-                            }
-                            
-                            // Check if VPN interface exists
-                            let [iface_success] = GLib.spawn_command_line_sync('ip link show pia');
-                            
-                            if (!iface_success) {
-                                global.log("[PIA VPN Applet] VPN interface not ready, attempt " + attempt + "/5, retrying in 3s...");
-                                Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
-                                    tryEnableKillswitch(attempt + 1);
-                                    return false;
-                                }));
-                                return;
-                            }
-                            
-                            global.log("[PIA VPN Applet] VPN interface ready, enabling kill switch...");
-                            
-                            // Re-enable kill switch
-                            let [success, stdout, stderr, exit_code] = GLib.spawn_command_line_sync(
-                                'sudo -n /usr/local/bin/pia-killswitch.sh enable'
-                            );
-                            
-                            let actual_exit = exit_code / 256;
-                            
-                            if (actual_exit === 0) {
-                                global.log("[PIA VPN Applet] ✓ Kill switch successfully re-enabled");
-                                GLib.spawn_command_line_sync('sudo -n rm -f /var/lib/pia/killswitch-was-enabled');
-                                this.update_status();
-                            } else {
-                                global.log("[PIA VPN Applet] Kill switch failed (exit " + actual_exit + "), retrying...");
-                                if (stderr && stderr.length > 0) {
-                                    global.log("[PIA VPN Applet] stderr: " + imports.byteArray.toString(stderr));
-                                }
-                                // Retry
-                                Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
-                                    tryEnableKillswitch(attempt + 1);
-                                    return false;
-                                }));
-                            }
-                        };
-                        
+
                         // Start trying to enable kill switch after 2 seconds
                         Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
-                            tryEnableKillswitch(1);
+                            this._enableKillswitchWhenReady(1);
                             return false;
                         }));
                     } else {
@@ -853,10 +803,14 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
             return;
         }
         
-        // Check if VPN interface exists
-        let [iface_success] = GLib.spawn_command_line_sync('ip link show pia');
-        
-        if (!iface_success) {
+        // Check if VPN interface exists. `success` here is only whether the
+        // spawn itself worked, not "ip"'s exit code, so the wait status has
+        // to be checked explicitly - "ip link show pia" still spawns fine
+        // and just exits non-zero when the interface doesn't exist yet.
+        let [iface_spawn_ok, , , iface_wait_status] = GLib.spawn_command_line_sync('ip link show pia');
+        let iface_exit = iface_wait_status / 256;
+
+        if (!iface_spawn_ok || iface_exit !== 0) {
             global.log("[PIA VPN Applet] VPN interface not ready, attempt " + attempt + "/5, retrying in 3s...");
             Mainloop.timeout_add_seconds(3, Lang.bind(this, () => {
                 this._enableKillswitchWhenReady(attempt + 1);
@@ -919,7 +873,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 try {
                     let [, stdout, stderr] = proc.communicate_utf8_finish(result);
                     
-                    if (stdout && stdout.indexOf('open') !== -1) {
+                    if (stdout && stdout.indexOf('OPEN') !== -1) {
                         if (this.port_test_item) {
                             this.port_test_item.label.set_text("✓ Port OPEN");
                         }

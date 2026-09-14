@@ -59,6 +59,21 @@ else
     exit 1
 fi
 
+# Extend sudoers for kill switch / watchdog / marker-file control. Without
+# this, the Cinnamon applet's sudo -n calls for pia-killswitch.sh,
+# pia-watchdog.sh, nft list tables, and the killswitch-was-enabled marker
+# are all denied - install.sh's own sudoers file only covers the base
+# connect/disconnect/status commands, not these.
+echo
+echo "Configuring sudoers for kill switch and watchdog control..."
+if [ -f "install-secure-sudoers.sh" ]; then
+    bash install-secure-sudoers.sh
+else
+    echo "✗ install-secure-sudoers.sh not found - the Cinnamon applet's kill switch"
+    echo "  and watchdog controls will keep prompting for a password until you run"
+    echo "  it manually from the repository root."
+fi
+
 # Ask user about kill switch
 echo
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

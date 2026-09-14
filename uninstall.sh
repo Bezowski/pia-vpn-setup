@@ -151,11 +151,17 @@ echo "Cleaning up data files..."
 rm -rf /var/lib/pia
 echo "✓ Data files removed"
 
-# Remove firewall rules
+# Remove firewall rules. update-firewall-for-port.sh always adds rules as
+# "2240,2242,<PORT>/tcp" (never a fixed literal), so deletion has to
+# enumerate whatever port is currently forwarded rather than guess it.
 echo "Removing firewall rules..."
-ufw delete allow 2240,2242/tcp 2>/dev/null || true
-ufw delete allow 2240,2242 2>/dev/null || true
+ufw status numbered 2>/dev/null | grep -oE '2240,2242,[0-9]+/tcp' | sort -u | while read -r rule; do
+  ufw delete allow "$rule" 2>/dev/null || true
+done
 echo "✓ Firewall rules removed"
+
+# Remove logrotate config installed by install.sh
+rm -f /etc/logrotate.d/pia-vpn
 
 echo
 echo "=== Uninstallation Complete ==="

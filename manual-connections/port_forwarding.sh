@@ -291,11 +291,14 @@ Payload   ${green}$payload${nc}
 
 "
 
-# Persist token atomically
+# Persist token atomically. 0600, not 644: this is a live PIA auth token,
+# and /var/lib/pia is world-readable (0755) - matches the permissions
+# pia-renew-and-connect-no-pf.sh and pia-renew-token-only.sh already use
+# for this same file.
 if [ -n "${PIA_TOKEN:-}" ]; then
   tmp="$(/bin/mktemp "${PERSIST_DIR}/token.txt.XXXX")"
   printf '%s\n' "$PIA_TOKEN" > "$tmp"
-  /bin/chmod 0644 "$tmp"
+  /bin/chmod 0600 "$tmp"
   /bin/mv -f "$tmp" "$TOKEN_FILE"
 fi
 
