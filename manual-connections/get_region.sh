@@ -257,6 +257,13 @@ if [[ $VPN_PROTOCOL == "wireguard" ]]; then
   echo "WG_SERVER_IP=$bestServer_WG_IP WG_HOSTNAME=$bestServer_WG_hostname \\"
   echo -e "PIA_PF=$PIA_PF ./connect_to_wireguard_with_token.sh${nc}"
   echo
+  # Report the region ID this run actually selected, so callers (e.g.
+  # pia-renew-and-connect-no-pf.sh) don't have to re-derive it later via an
+  # independent server-list fetch matched by gateway IP - PIA's server pool
+  # for a region isn't guaranteed stable between two back-to-back API calls,
+  # so the specific server just connected to can already be gone from a
+  # fresh fetch a moment later.
+  echo "REGION_ID=$selectedRegion"
   PIA_PF=$PIA_PF PIA_TOKEN=$PIA_TOKEN WG_SERVER_IP=$bestServer_WG_IP \
     WG_HOSTNAME=$bestServer_WG_hostname ./connect_to_wireguard_with_token.sh
   rm -f /opt/piavpn-manual/latencyList

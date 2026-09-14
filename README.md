@@ -386,6 +386,7 @@ The following PIA manual-connections scripts have been modified from the origina
 
 * `port_forwarding.sh` - Updated permissions for forwarded_port file (644 instead of 600)
 * `connect_to_wireguard_with_token.sh` - Added Network Manager applet reload
+* `get_region.sh` - WireGuard auto-connect path now also prints `REGION_ID=<id>` for the region it selected, so callers don't have to re-derive it later from a second, independent server-list lookup
 
 Additional improvements:
 * Atomic token file writes to prevent race conditions

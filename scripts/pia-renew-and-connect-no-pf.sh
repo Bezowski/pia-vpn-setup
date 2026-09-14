@@ -123,6 +123,7 @@ export PREFERRED_REGION AUTOCONNECT
 REGION_OUTPUT=$(./get_region.sh 2>&1)
 echo "$REGION_OUTPUT"
 export WG_HOSTNAME=$(echo "$REGION_OUTPUT" | grep -oP 'WG_HOSTNAME=\K[^ \\]+' | head -1)
+REGION_ID_FROM_OUTPUT=$(echo "$REGION_OUTPUT" | grep -oP 'REGION_ID=\K[^ \\]+' | head -1)
 
 # Function to get server list (with caching)
 get_server_list() {
@@ -216,8 +217,15 @@ if [ "$AUTOCONNECT" != "true" ] && [ "$PREFERRED_REGION" != "none" ]; then
   # Manual selection - use what was set
   REGION_ID="$PREFERRED_REGION"
   echo "Using manually selected region: $REGION_ID"
+elif [ -n "${REGION_ID_FROM_OUTPUT:-}" ] && [ "$REGION_ID_FROM_OUTPUT" != "null" ]; then
+  # get_region.sh already determined exactly which region it picked - trust
+  # that directly rather than re-deriving it below via a second, independent
+  # server-list fetch matched by gateway IP.
+  REGION_ID="$REGION_ID_FROM_OUTPUT"
+  echo "Using region reported by get_region.sh: $REGION_ID"
 else
-  # Autoconnect or need to look up region from gateway IP
+  # Fallback for older get_region.sh output with no REGION_ID line (e.g. the
+  # OpenVPN path): look up region from gateway IP
   if [ -n "$GATEWAY" ]; then
     echo "Looking up region from gateway IP: $GATEWAY"
     
