@@ -387,7 +387,8 @@ The following PIA manual-connections scripts have been modified from the origina
 
 * `port_forwarding.sh` - Updated permissions for forwarded_port file (644 instead of 600)
 * `connect_to_wireguard_with_token.sh` - Added Network Manager applet reload
-* `get_region.sh` - WireGuard auto-connect path now also prints `REGION_ID=<id>` for the region it selected, so callers don't have to re-derive it later from a second, independent server-list lookup
+* `get_region.sh` - WireGuard auto-connect path now also prints `REGION_ID=<id>` for the region it selected, so callers don't have to re-derive it later from a second, independent server-list lookup; also now propagates `connect_to_wireguard_with_token.sh`'s real exit status instead of hardcoding `exit 0`, so a failed connect (e.g. a rejected auth token) is no longer reported as success
+* `get_token.sh` - Also rejects a JSON `null` token value (`jq -r` renders it as the literal text `"null"`, not an empty string, so the original empty-string-only check let a rate-limited/rejected auth response through as if it were a valid token)
 
 Additional improvements:
 * Atomic token file writes to prevent race conditions

@@ -39,13 +39,15 @@ fi
 case "${1:-}" in
     region)
         region_id="${2:-}"
-        # PIA region ids are lowercase alphanumeric plus underscores (e.g.
-        # us_east, uk_london, au_sydney). This charset can't contain a
-        # sed delimiter, backslash, or newline, so it's safe to
-        # substitute directly into the s/// script below - there's no
-        # way to break out of the substitution or inject another sed
+        # PIA region ids are lowercase alphanumeric plus underscores and
+        # hyphens (e.g. us_east, uk_london, au_sydney - and the
+        # "Streaming Optimized" regions, which use ids like
+        # au_australia-so, us-streaming, ch-so). This charset can't
+        # contain a sed delimiter, backslash, or newline, so it's safe
+        # to substitute directly into the s/// script below - there's
+        # no way to break out of the substitution or inject another sed
         # command.
-        if [ -z "$region_id" ] || ! [[ "$region_id" =~ ^[a-z0-9_]+$ ]]; then
+        if [ -z "$region_id" ] || ! [[ "$region_id" =~ ^[a-z0-9_-]+$ ]]; then
             echo "Error: invalid region id '$region_id'" >&2
             exit 1
         fi

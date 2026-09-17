@@ -117,8 +117,22 @@ if [ "$AUTOCONNECT" = "true" ]; then
 fi
 export PREFERRED_REGION AUTOCONNECT
 
+# get_region.sh's exit status now reflects whether it actually connected
+# (see manual-connections/get_region.sh), not just whether it ran. Capture
+# it with `set +e` around the call and print $REGION_OUTPUT regardless of
+# outcome - otherwise, under `set -e`, a real failure here would abort the
+# script on this assignment before the diagnostic output it just spent
+# several seconds gathering (server list fetch, token request, the actual
+# connect attempt) ever gets printed, leaving nothing to debug from.
+set +e
 REGION_OUTPUT=$(./get_region.sh 2>&1)
+region_exit=$?
+set -e
 echo "$REGION_OUTPUT"
+if [ "$region_exit" -ne 0 ]; then
+  echo "❌ get_region.sh failed (exit $region_exit), aborting connect" >&2
+  exit "$region_exit"
+fi
 export WG_HOSTNAME=$(echo "$REGION_OUTPUT" | grep -oP 'WG_HOSTNAME=\K[^ \\]+' | head -1)
 REGION_ID_FROM_OUTPUT=$(echo "$REGION_OUTPUT" | grep -oP 'REGION_ID=\K[^ \\]+' | head -1)
 
@@ -142,16 +156,18 @@ get_server_list() {
         if [ "$cache_age" -lt "$CACHE_MAX_AGE" ]; then
             # VALIDATE CACHE FORMAT before using
             if echo "$(<"$CACHE_FILE")" | jq -e '.regions[0].id' >/dev/null 2>&1; then
-                local first_id=$(jq -r '.regions[0].id' "$CACHE_FILE" 2>/dev/null)
-                # Check if using old hyphen format
-                if echo "$first_id" | grep -q '^[a-z][a-z]-'; then
-                    echo "⚠️  Cache uses old region ID format (hyphens), forcing refresh..." >&2
-                    rm -f "$CACHE_FILE"
-                else
-                    echo "Using cached server list (age: ${cache_age}s)" >&2
-                    cat "$CACHE_FILE"
-                    return 0
-                fi
+                # NOTE: this used to also reject caches whose first region id
+                # matched two-letters-then-hyphen (e.g. "au-melbourne") as an
+                # "old format". That's wrong - PIA's current, live region
+                # list legitimately mixes hyphens and underscores in the
+                # same response (e.g. "us-newjersey" sits at regions[0]
+                # today, right alongside "au_sydney" and the
+                # hyphen-suffixed "Streaming Optimized" ids like
+                # "au_australia-so"). That check was forcing a full
+                # server-list refetch on effectively every connect.
+                echo "Using cached server list (age: ${cache_age}s)" >&2
+                cat "$CACHE_FILE"
+                return 0
             else
                 echo "⚠️  Cache file is corrupted, forcing refresh..." >&2
                 rm -f "$CACHE_FILE"

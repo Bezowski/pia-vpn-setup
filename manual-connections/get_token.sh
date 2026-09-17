@@ -74,7 +74,13 @@ generateTokenResponse=$(curl -s --location --request POST \
   --form "username=$PIA_USER" \
   --form "password=$PIA_PASS" )
 
-if [ "$(echo "$generateTokenResponse" | jq -r '.token')" == "" ]; then
+token_value="$(echo "$generateTokenResponse" | jq -r '.token')"
+# jq -r renders a JSON `null` (e.g. {"token": null}, which the API can
+# return under rate limiting) as the literal text "null", not an empty
+# string - so this has to be checked for explicitly, or a rejected
+# request gets treated as a successful login and "null" gets written out
+# and used as a real auth token downstream.
+if [ "$token_value" == "" ] || [ "$token_value" == "null" ]; then
   echo
   echo
   echo -e "${red}Could not authenticate with the login credentials provided!${nc}"

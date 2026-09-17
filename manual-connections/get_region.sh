@@ -266,8 +266,16 @@ if [[ $VPN_PROTOCOL == "wireguard" ]]; then
   echo "REGION_ID=$selectedRegion"
   PIA_PF=$PIA_PF PIA_TOKEN=$PIA_TOKEN WG_SERVER_IP=$bestServer_WG_IP \
     WG_HOSTNAME=$bestServer_WG_hostname ./connect_to_wireguard_with_token.sh
+  # Propagate the real result instead of a hardcoded 0 - this used to
+  # report success unconditionally even when connect_to_wireguard_with_token.sh
+  # failed (e.g. an invalid/null token got rejected by the API), which let
+  # pia-renew-and-connect-no-pf.sh's caller (which does check this exit
+  # status, via `set -e` on a failing command substitution) print
+  # "VPN connected" and move on despite the "pia" interface never having
+  # been created.
+  connect_status=$?
   rm -f /opt/piavpn-manual/latencyList
-  exit 0
+  exit $connect_status
 fi
 
 # Connect with OpenVPN and clear authentication token file and latencyList

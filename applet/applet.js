@@ -26,6 +26,13 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
         this._last_toggle_text = null;
         this.connection_quality = null;
         this._port_test_in_progress = false;
+        // True while we've deliberately taken the VPN down to bring it back
+        // up elsewhere (region switch, reconnect, find fastest server).
+        // While set, update_status() skips the real `ip addr show pia`
+        // check and just repaints the forced "disconnected" state, so a
+        // stray inotify-triggered poll can't read the stale not-yet-torn-
+        // down interface and flip the icon back to green mid-reconnect.
+        this._reconnecting = false;
         
         this.set_applet_icon_path(this.metadata.path + "/icons/disconnected.png");
         this.set_applet_tooltip("PIA VPN");
@@ -104,10 +111,17 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 
                 if (line !== null) {
                     Mainloop.idle_add(Lang.bind(this, () => {
+                        // Retry loading the server list cache if we don't have
+                        // one yet (e.g. it didn't exist or failed validation
+                        // on startup) - a VPN (re)connect rewrites this file,
+                        // which is the only thing that can fix that state.
+                        if (!this.servers_data) {
+                            this.fetch_servers_data();
+                        }
                         this.update_status();
                         return false;
                     }));
-                    
+
                     this._readInotifyLine(stream, proc);
                 } else {
                     this.log("inotify stream ended");
@@ -236,12 +250,19 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                     this.log("Cache invalid: region missing required fields");
                     return false;
                 }
-                
-                // Validate region ID format (should contain underscore, not hyphen)
-                if (region.id.indexOf('-') !== -1 && region.id.indexOf('_') === -1) {
-                    this.log("Cache invalid: old region ID format detected: " + region.id);
-                    return false;
-                }
+
+                // NOTE: there used to be a check here rejecting hyphenated
+                // region ids as an "old format". That's wrong - PIA's
+                // current, live region list legitimately mixes hyphens and
+                // underscores in the same response (e.g. "us-newjersey"
+                // alongside "au_sydney" and "au_australia-so" for
+                // Streaming Optimized regions). That check was silently
+                // invalidating perfectly good caches - since
+                // "us-newjersey" sorts first in the raw region list, it
+                // tripped on effectively every load, cascading into
+                // _refresh_server_cache() (which doesn't exist) and
+                // leaving servers_data null, i.e. an empty "Select
+                // Server" menu.
             }
             
             return true;
@@ -273,9 +294,15 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 }
             }
             
-            this.log("Cache not found or invalid, triggering refresh...");
-            // Trigger cache refresh by calling the script
-            this._refresh_server_cache();
+            // There's no standalone way to regenerate just the server list -
+            // it's only (re)written as a side effect of pia-vpn.service's
+            // connect flow (pia-renew-and-connect-no-pf.sh). So there's
+            // nothing to trigger from here; leave servers_data null and
+            // let the inotify watcher retry fetch_servers_data() once a
+            // VPN (re)connect writes a fresh cache file (see
+            // _readInotifyLine).
+            this.servers_data = null;
+            this.log("Cache not found or invalid - will retry on next /var/lib/pia/ change");
         } catch(e) {
             this.logError("Failed to fetch server data", e);
         }
@@ -367,7 +394,7 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                             ['sudo', '-n', '/usr/local/bin/pia-set-credential.sh', 'autoconnect', 'false'],
                             Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
                         );
-                        
+
                         proc2.wait_async(null, Lang.bind(this, (proc2, res2) => {
                             try {
                                 proc2.wait_finish(res2);
@@ -382,43 +409,100 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                                         ['sudo', '-n', 'chmod', '600', '/etc/pia-credentials'],
                                         Gio.SubprocessFlags.NONE
                                     );
-                                    
-                                    Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'restart', 'pia-vpn.service'], 
+
+                                    Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'restart', 'pia-vpn.service'],
                                         Gio.SubprocessFlags.NONE);
-                                    
+
+                                    // Show disconnected immediately rather than
+                                    // waiting for status polling to notice - the
+                                    // interface actually does go down during the
+                                    // region switch, but nothing prompts a status
+                                    // check during that window (no periodic
+                                    // polling, and the metrics writes during
+                                    // disconnect_vpn() aren't under the
+                                    // non-recursive inotify watch), so the icon
+                                    // would otherwise stay green until the 10s
+                                    // callback below, by which point the VPN is
+                                    // usually already back up.
+                                    this._reconnecting = true;
+                                    this.is_connected = false;
+                                    this.update_ui();
+
                                     // Use the same reconnect logic as on_quick_reconnect
                                     Mainloop.timeout_add_seconds(10, Lang.bind(this, () => {
                                         // Resume watchdog
-                                        Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-watchdog.sh', 'resume'], 
+                                        Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-watchdog.sh', 'resume'],
                                             Gio.SubprocessFlags.NONE);
-                                        
+
                                         // Check if kill switch should be re-enabled
                                         let file = Gio.file_new_for_path('/var/lib/pia/killswitch-was-enabled');
                                         if (file.query_exists(null)) {
                                             this._enableKillswitchWhenReady(1);
                                         }
-                                        
+
+                                        this._reconnecting = false;
                                         this.update_status();
                                         this._buildMenu();
                                         return false;
                                     }));
+                                } else {
+                                    this.logError("pia-set-credential.sh autoconnect false failed (exit " +
+                                        proc2.get_exit_status() + ")", "");
+                                    this._restore_after_failed_select();
                                 }
                             } catch(e) {
                                 this.logError("Failed to update AUTOCONNECT setting", e);
+                                this._restore_after_failed_select();
                             }
                         }));
+                    } else {
+                        // VPN was never touched at this point (region/autoconnect are
+                        // only applied after both writes succeed), so just undo the
+                        // pause/disable done above instead of leaving them stuck.
+                        this.logError("pia-set-credential.sh region " + region_id + " failed (exit " +
+                            proc1.get_exit_status() + ") - region id likely rejected by the script's validation", "");
+                        this._restore_after_failed_select();
                     }
                 } catch(e) {
                     this.logError("Failed to update PREFERRED_REGION setting", e);
+                    this._restore_after_failed_select();
                 }
             }));
         } catch(e) {
             this.logError("Failed to select server", e);
         }
     }
+
+    // Undoes the watchdog-pause/killswitch-disable done at the top of
+    // on_select_server when the credential update itself fails before the
+    // VPN is ever restarted, so a rejected region doesn't leave the
+    // watchdog paused or the kill switch off with no way back short of
+    // manually running `pia-watchdog.sh resume` / `pia-killswitch.sh enable`.
+    _restore_after_failed_select() {
+        try {
+            this._reconnecting = false;
+            Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-watchdog.sh', 'resume'],
+                Gio.SubprocessFlags.NONE);
+
+            let file = Gio.file_new_for_path('/var/lib/pia/killswitch-was-enabled');
+            if (file.query_exists(null)) {
+                Gio.Subprocess.new(['sudo', '-n', '/usr/local/bin/pia-killswitch.sh', 'enable'],
+                    Gio.SubprocessFlags.NONE);
+                GLib.spawn_command_line_sync('sudo -n rm -f /var/lib/pia/killswitch-was-enabled');
+            }
+
+            this.update_status();
+        } catch(e) {
+            this.logError("Failed to restore state after failed server selection", e);
+        }
+    }
     
     update_status() {
         try {
+            if (this._reconnecting) {
+                this.update_ui();
+                return;
+            }
             this.check_vpn_status();
             this.get_forwarded_port();
             this.get_current_region();
@@ -755,9 +839,15 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
     on_quick_reconnect() {
         try {
             // Use systemctl restart to get fresh token and config
-            Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'restart', 'pia-vpn.service'], 
+            Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'restart', 'pia-vpn.service'],
                 Gio.SubprocessFlags.NONE);
-            
+
+            // Show disconnected immediately - see the comment in
+            // on_select_server for why this doesn't happen on its own.
+            this._reconnecting = true;
+            this.is_connected = false;
+            this.update_ui();
+
             // Wait for VPN to connect, then resume watchdog and re-enable kill switch
             Mainloop.timeout_add_seconds(10, Lang.bind(this, () => {
                 global.log("[PIA VPN Applet] Reconnect: checking for marker file");
@@ -787,7 +877,8 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                 } catch(e) {
                     this.logError("Error checking killswitch marker", e);
                 }
-                
+
+                this._reconnecting = false;
                 this.update_status();
                 return false;
             }));
@@ -936,7 +1027,13 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                     proc.wait_finish(res);
                     if (proc.get_exit_status() === 0) {
                         Gio.Subprocess.new(['sudo', '-n', 'wg-quick', 'down', 'pia'], Gio.SubprocessFlags.NONE);
-                        
+
+                        // Show disconnected immediately - see the comment in
+                        // on_select_server for why this doesn't happen on its own.
+                        this._reconnecting = true;
+                        this.is_connected = false;
+                        this.update_ui();
+
                         Mainloop.timeout_add_seconds(2, Lang.bind(this, () => {
                             Gio.Subprocess.new(['sudo', '-n', 'systemctl', 'restart', 'pia-vpn.service'], 
                                 Gio.SubprocessFlags.NONE);
@@ -952,7 +1049,8 @@ const PIAVPNApplet = class PIAVPNApplet extends Applet.IconApplet {
                                 if (file.query_exists(null)) {
                                     this._enableKillswitchWhenReady(1);
                                 }
-                                
+
+                                this._reconnecting = false;
                                 this.update_status();
                                 this._buildMenu();
                                 return false;
