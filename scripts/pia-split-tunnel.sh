@@ -163,6 +163,18 @@ setup() {
         useradd -r -s /usr/sbin/nologin -m "$BYPASS_USER"
     fi
 
+    # GPU render node access (/dev/dri/renderD*) for hardware video decode in
+    # bypass-launched GUI apps (see launch()) - the render nodes are
+    # crw-rw---- root:render with no ACL for this user, so without group
+    # membership $BYPASS_USER can't open a render node at all. That makes
+    # VAAPI/NVDEC silently never engage no matter what LIBVA_DRIVER_NAME or
+    # other driver-specific env vars launch() sets, or what sandbox flags
+    # the app is started with - confirmed via /proc/<pid>/fd showing zero
+    # open dri fds regardless. Idempotent, safe to re-run every setup().
+    if getent group render &>/dev/null; then
+        usermod -aG render "$BYPASS_USER"
+    fi
+
     IFACE=$(detect_physical_iface)
     if [ -z "$IFACE" ]; then
         echo "Error: could not detect physical interface. Is a non-VPN default route present?" >&2
@@ -372,15 +384,31 @@ launch() {
     # pipeline / "Error #3000" failure). pia-split-tunnel-watch re-asserts
     # it every poll - see ensure_audio_acl() in watch().
     local runtime_dir="/run/user/$real_uid"
-    # This GPU's hardware video decoder (Kepler-generation NVDEC) only
-    # supports H.264/MPEG/VC1 - no VP9/AV1. Without a working Nvidia VAAPI
-    # backend (nvidia-vaapi-driver), Chromium-based browsers can't correctly
-    # negotiate that limit and instead crash mid-stream on sites that serve
-    # VP9 (e.g. Twitch), surfacing as a decode error that only clears on a
-    # full browser restart. Forcing the driver name here makes VAAPI queries
-    # resolve correctly, so unsupported codecs cleanly fall back to software
-    # decode instead of crashing.
-    local env_args=(DISPLAY="${DISPLAY:-:0}" LIBVA_DRIVER_NAME=nvidia)
+    # No LIBVA_DRIVER_NAME/NVD_BACKEND here (deliberately) - hardware video
+    # decode via VAAPI was investigated and found not achievable through
+    # this launch path:
+    #   - $BYPASS_USER previously had no render-group membership at all, so
+    #     Chromium's GPU process could never open any /dev/dri/render* node
+    #     (fixed above - that part's a real, worthwhile fix on its own).
+    #   - With that fixed, the GPU process does correctly open the Nvidia
+    #     node on its own (no driver-name override needed) - but decode
+    #     still fails, because nvidia-vaapi-driver's default "egl" backend
+    #     has a broken CUDA/EGL interop path on this GPU/driver-470 combo
+    #     (confirmed via `NVD_LOG=1 ffmpeg -hwaccel vaapi ...`: surface
+    #     export fails with "CUDA ERROR 'invalid resource handle'" the
+    #     moment a frame is actually decoded). The "direct" backend avoids
+    #     this and decodes cleanly (also confirmed via the same ffmpeg
+    #     test) - but NVD_BACKEND=direct never reaches the GPU process:
+    #     Chromium filters child-process environments down to its own
+    #     internal allowlist regardless of sandbox flags (confirmed with
+    #     --disable-gpu-sandbox, --no-zygote and --no-sandbox all
+    #     together), and nvidia-vaapi-driver has no non-env config option
+    #     (checked via `strings` on nvidia_drv_video.so).
+    # Net effect either way is software decode (VP9/AV1 cleanly fall back;
+    # H.264 would too, same as without any of this), so there's nothing to
+    # gain by setting these here - only forcing a wrong render node if the
+    # env somehow did apply.
+    local env_args=(DISPLAY="${DISPLAY:-:0}")
     if [ -d "$runtime_dir" ]; then
         setfacl -m "u:$BYPASS_USER:x" "$runtime_dir" 2>/dev/null || true
         [ -d "$runtime_dir/pulse" ] && setfacl -m "u:$BYPASS_USER:x" "$runtime_dir/pulse" 2>/dev/null || true
