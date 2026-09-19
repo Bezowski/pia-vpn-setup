@@ -83,9 +83,14 @@ reconnect_vpn() {
   }
   sleep 2
   
-  # Step 2: Start the VPN service (non-blocking)
-  echo "Step 2: Starting pia-vpn.service (non-blocking)..."
-  systemctl start pia-vpn.service --no-block
+  # Step 2: Restart the VPN service (non-blocking)
+  # Must be `restart`, not `start`: pia-vpn.service is Type=oneshot with
+  # RemainAfterExit=yes, so systemd still considers it "active" from before
+  # suspend even though we just tore the interface down above. `start` on an
+  # already-active oneshot unit is a no-op and silently does nothing; only
+  # `restart` forces systemd to actually re-run ExecStart.
+  echo "Step 2: Restarting pia-vpn.service (non-blocking)..."
+  systemctl restart pia-vpn.service --no-block
   
   echo "✓ VPN service started in background"
   echo "  (Service will complete connection and restart port forwarding automatically)"
