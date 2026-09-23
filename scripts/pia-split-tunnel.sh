@@ -153,6 +153,25 @@ detect_physical_gateway() {
     ip route show table main | awk -v ifc="$iface" '/^default/ && $0 ~ ifc {for(i=1;i<=NF;i++) if($i=="via") print $(i+1)}' | head -1
 }
 
+# Fail-closed backstop for the bypass table. The kernel deletes every route
+# through an interface when it goes down (e.g. a Wi-Fi drop/reconnect), which
+# empties this table. A lookup in an empty table doesn't fail - it falls
+# through to the next ip rule, i.e. wg-quick's "not fwmark 0xca6c lookup
+# 51820", sending marked bypass traffic into the VPN. Worse, (apparently)
+# WireGuard's encrypted outer packet still carries the originating novpn socket, so mangle
+# OUTPUT re-marks it 0x200 (overwriting WireGuard's own fwmark), it falls
+# through into pia again, and so on: a self-sustaining encryption loop that
+# pinned a core at 100% in kworker/wg-crypt-pia (~22MB/s into pia, ~1KB/s
+# actually leaving on the physical interface). Unreachable routes aren't tied
+# to an interface, so this one survives link-down and turns "no bypass route"
+# into ENETUNREACH instead of a fall-through. The high metric keeps it behind
+# the real default route whenever that exists.
+add_bypass_unreachable_backstop() {
+    if ! ip route show table $BYPASS_TABLE | grep -q '^unreachable default'; then
+        ip route add unreachable default metric 4000 table $BYPASS_TABLE
+    fi
+}
+
 setup() {
     require_root_for_command setup
 
@@ -195,6 +214,7 @@ setup() {
     # Routing table for bypass traffic -> goes out the physical gateway
     ip route flush table $BYPASS_TABLE 2>/dev/null || true
     ip route add default via "$GATEWAY" dev "$IFACE" table $BYPASS_TABLE
+    add_bypass_unreachable_backstop
 
     # Rule for marked packets - see BYPASS_RULE_PRIORITY above for why this
     # must be checked before wg-quick's own rules.
@@ -461,6 +481,10 @@ launch() {
 #     generic "Error #3000"), usually right after an unpause since
 #     Chromium tears down idle audio streams. Polled like item 2 - a
 #     chmod/setfacl leaves no event stream to react to.
+#  4. The bypass table's default route - deleted by the kernel whenever the
+#     physical interface goes down (Wi-Fi drop/reconnect), and nothing else
+#     ever re-adds it. See add_bypass_unreachable_backstop() for what an
+#     empty table leads to. Polled like item 2.
 #  Note: an earlier version of ensure_killswitch() below matched the mark
 #  with a plain `grep "$BYPASS_MARK"` (e.g. "0x200"), but nft normalizes
 #  mark values to zero-padded hex when printing (e.g. "0x00000200"), which
@@ -514,6 +538,39 @@ watch() {
     # unidentified trigger" mystery this watchdog was written to guard
     # against remains unsolved as of this fix; don't assume ensure_mangle
     # firing is evidence of it.
+    # See add_bypass_unreachable_backstop() for why an empty bypass table is
+    # dangerous. The real default route vanishes whenever the physical
+    # interface bounces, and the interface/gateway may differ afterwards
+    # (switching Wi-Fi networks, or Wi-Fi <-> Ethernet), so re-detect rather
+    # than trusting $GATEWAY_FILE. If the MASQUERADE rule was bound to a
+    # different interface, drop it here and let ensure_masquerade() re-add
+    # it for the new one. No physical default route at all (link still down)
+    # -> leave it; the backstop keeps bypass traffic failing closed until
+    # a later poll finds one.
+    ensure_route() {
+        add_bypass_unreachable_backstop 2>/dev/null || true
+
+        local iface gateway old_iface
+        iface=$(detect_physical_iface)
+        [ -n "$iface" ] || return 0
+        gateway=$(detect_physical_gateway "$iface")
+        [ -n "$gateway" ] || return 0
+
+        if ! ip route show table $BYPASS_TABLE | grep -qE "^default via ${gateway//./\\.} dev $iface( |\$)"; then
+            ip route replace default via "$gateway" dev "$iface" table $BYPASS_TABLE 2>/dev/null || return 0
+            echo "$(date '+%F %T'): bypass route missing or stale, set to $gateway dev $iface"
+        fi
+
+        old_iface=""
+        [ -f "$GATEWAY_FILE" ] && read -r old_iface _ < "$GATEWAY_FILE" || true
+        if [ "$old_iface" != "$iface" ] && [ -n "$old_iface" ]; then
+            while iptables -t nat -D POSTROUTING -o "$old_iface" -m mark --mark $BYPASS_MARK -j MASQUERADE 2>/dev/null; do :; done
+        fi
+        if [ "$(cat "$GATEWAY_FILE" 2>/dev/null)" != "$iface $gateway" ]; then
+            echo "$iface $gateway" > "$GATEWAY_FILE"
+        fi
+    }
+
     ensure_mangle() {
         if ! iptables -t mangle -S OUTPUT | grep -q -- "--uid-owner $(bypass_uid) "; then
             echo "$(date '+%F %T'): mangle marking missing, re-adding"
@@ -583,6 +640,7 @@ watch() {
 
     ensure_all() {
         ensure_rule
+        ensure_route
         ensure_mangle
         ensure_masquerade
         ensure_killswitch
