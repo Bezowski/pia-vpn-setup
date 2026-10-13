@@ -3,7 +3,7 @@
 Automated PIA VPN setup for Linux (WireGuard + systemd), tested on Linux Mint 22.2 / Cinnamon. GitHub: `Bezowski/pia-vpn-setup`, pushed via SSH.
 
 ## Layout
-- `install.sh`, `install-security-features.sh`, `install-secure-sudoers.sh`, `uninstall.sh` — top-level installers
+- `install.sh`, `install-security-features.sh`, `install-secure-sudoers.sh`, `uninstall.sh` — top-level installers; `update.sh` updates an existing install (`git pull && sudo ./update.sh`). It globs `scripts/`, `systemd/` and `manual-connections/`, so new base files are picked up automatically, but a new *optional* file (kill switch/watchdog/split tunnel) must be added to its `OPTIONAL_*` lists or it'll be installed everywhere
 - `scripts/` — core daemons/CLIs: `pia-common.sh` (shared function library), `pia-killswitch.sh`, `pia-watchdog.sh`, `pia-split-tunnel.sh`, `pia-health-check.sh`, `pia-metrics.sh`, `pia-stats.sh`, plus wrapper scripts for port-forward/firewall/suspend
 - `manual-connections/` — vendored/modified scripts from upstream `pia-foss/manual-connections` (note the two documented deviations from upstream in README's "Modified Scripts" section)
 - `systemd/` — unit files for `pia-vpn`, `pia-token-renew` (service+timer), `pia-port-forward`, `pia-suspend`, `pia-watchdog`, `pia-split-tunnel-watch`

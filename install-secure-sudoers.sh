@@ -82,6 +82,14 @@ else
     exit 1
 fi
 
+# Nothing to do if it's already current - avoids piling up a new backup
+# file on every update.sh run.
+if cmp -s /tmp/pia-vpn-sudoers /etc/sudoers.d/pia-vpn; then
+    rm -f /tmp/pia-vpn-sudoers
+    echo "✓ Sudoers already up to date"
+    exit 0
+fi
+
 # Backup existing file if it exists
 if [ -f /etc/sudoers.d/pia-vpn ]; then
     BACKUP_FILE="/etc/sudoers.d/pia-vpn.backup.$(date +%s)"

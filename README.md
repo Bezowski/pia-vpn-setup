@@ -259,6 +259,17 @@ Metrics tracked:
 
 Metrics are stored in `/var/lib/pia/metrics/vpn-metrics.log` with automatic rotation (last 10,000 events).
 
+## Updating
+
+On a machine that's already set up:
+
+```bash
+cd ~/projects/pia-vpn-setup
+git pull && sudo ./update.sh
+```
+
+`update.sh` is non-interactive and keeps the machine's current setup. It updates only the files that changed, including the kill switch, watchdog and split tunneling, but only where they're already installed (it never adds them). It reloads systemd, restarts the watchdogs, and reloads the kill switch rules if the kill switch is on. It doesn't restart the VPN, so connect-script changes apply on the next connect. Don't use `install.sh` for updates: it skips the security features, so they silently stay on the old version.
+
 ## Services
 
 * `pia-vpn.service` - Connects VPN on boot
@@ -362,6 +373,7 @@ sudo ./run_setup.sh
 - `install.sh` - Main installer
 - `install-security-features.sh` - Install kill switch and watchdog
 - `install-secure-sudoers.sh` - Secure sudoers configuration
+- `update.sh` - Updates an existing install from the current checkout
 - `uninstall.sh` - Clean uninstaller
 
 ## File Locations
