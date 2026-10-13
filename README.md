@@ -83,6 +83,21 @@ DISABLE_IPV6="yes"               # Disable IPv6 to prevent leaks
 sudo reboot
 ```
 
+## Updating
+
+On a machine that's already set up:
+
+```bash
+cd ~/projects/pia-vpn-setup
+git pull && sudo ./update.sh
+```
+
+`update.sh` is non-interactive and keeps the machine's current setup. It updates only the files that changed, including the kill switch, watchdog and split tunneling, but only where they're already installed (it never adds them). It reloads systemd, restarts the watchdogs, and reloads the kill switch rules if the kill switch is on. It doesn't restart the VPN, so connect-script changes apply on the next connect. Don't use `install.sh` for updates: it skips the security features, so they silently stay on the old version.
+
+- If it reports that the applet changed, restart Cinnamon (Alt+F2, then `r`) to load the new version.
+- To add a component a machine doesn't have yet (e.g. the kill switch), run its installer (`sudo ./install-security-features.sh`) instead.
+- Running it again when nothing has changed is safe: it prints "Already up to date" and doesn't restart anything.
+
 ## Usage
 
 ### Basic Commands
@@ -258,17 +273,6 @@ Metrics tracked:
 - Connection failures
 
 Metrics are stored in `/var/lib/pia/metrics/vpn-metrics.log` with automatic rotation (last 10,000 events).
-
-## Updating
-
-On a machine that's already set up:
-
-```bash
-cd ~/projects/pia-vpn-setup
-git pull && sudo ./update.sh
-```
-
-`update.sh` is non-interactive and keeps the machine's current setup. It updates only the files that changed, including the kill switch, watchdog and split tunneling, but only where they're already installed (it never adds them). It reloads systemd, restarts the watchdogs, and reloads the kill switch rules if the kill switch is on. It doesn't restart the VPN, so connect-script changes apply on the next connect. Don't use `install.sh` for updates: it skips the security features, so they silently stay on the old version.
 
 ## Services
 
