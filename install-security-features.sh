@@ -59,6 +59,19 @@ else
     exit 1
 fi
 
+# Kill switch boot restore - nftables rules don't survive a reboot, so
+# without this an enabled kill switch is silently off after every boot.
+# A no-op unless the kill switch was enabled before the reboot.
+if [ -f "systemd/pia-killswitch-restore.service" ]; then
+    cp systemd/pia-killswitch-restore.service /etc/systemd/system/
+    systemctl daemon-reload
+    systemctl enable pia-killswitch-restore.service
+    echo "✓ Kill switch boot restore installed"
+else
+    echo "✗ systemd/pia-killswitch-restore.service not found"
+    exit 1
+fi
+
 # Extend sudoers for kill switch / watchdog / marker-file control. Without
 # this, the Cinnamon applet's sudo -n calls for pia-killswitch.sh,
 # pia-watchdog.sh, nft list tables, and the killswitch-was-enabled marker

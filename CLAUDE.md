@@ -19,7 +19,8 @@ Automated PIA VPN setup for Linux (WireGuard + systemd), tested on Linux Mint 22
 
 ## Kill switch architecture (`scripts/pia-killswitch.sh`)
 - nftables table `inet pia_killswitch`, default-deny egress. Exceptions: loopback, established/related, auto-detected LAN subnet, Tailscale (`100.64.0.0/10`), the `pia` interface, DNS, DHCP, and PIA's own WireGuard server IP ranges (needed to establish the tunnel in the first place).
-- Commands: `enable`, `disable`, `status`, `test` (runs 5 diagnostic checks, including split-tunnel bypass verification).
+- Commands: `enable`, `disable`, `status`, `restore`, `test` (runs 5 diagnostic checks, including split-tunnel bypass verification).
+- **Boot persistence:** nftables rules are in-memory only. `pia-killswitch-restore.service` runs `restore` after `pia-vpn.service`, re-enabling if `/var/lib/pia/killswitch-enabled` (or the applet's/watchdog's `killswitch-was-enabled*` markers) exist. It deliberately does *not* run before the network: the ruleset doesn't allow the PIA server-list/token APIs or arbitrary WireGuard server IPs (the hardcoded PIA ranges don't cover e.g. the AU servers), so every (re)connect - boot, applet, watchdog - happens with the kill switch off. Making the kill switch fail-closed through a connect would need a connect-path exception first.
 - **Gotcha:** rules must use `oifname`/`iifname`, never `oif`/`iif`. `oif` resolves the interface name to a kernel ifindex at ruleset *load* time — if `pia` doesn't exist yet (the kill switch must load before the VPN comes up), the whole ruleset fails to load with "Interface does not exist". `oifname`/`iifname` match by name string dynamically.
 - The split-tunnel bypass exception (`meta mark 0x00000200 accept`) is generated directly into the ruleset (not added at runtime via `nft add rule`), so it survives every enable/disable cycle.
 

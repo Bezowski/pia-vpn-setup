@@ -116,9 +116,10 @@ sudo ./install-security-features.sh
 This will:
 1. Install kill switch script (`pia-killswitch.sh`)
 2. Install watchdog script and service (`pia-watchdog.sh`)
-3. Configure sudoers (via `install-secure-sudoers.sh`) so the applet's kill switch and watchdog controls work without a password prompt
-4. Optionally enable kill switch (blocks non-VPN traffic)
-5. Optionally enable watchdog service (auto-recovery)
+3. Install `pia-killswitch-restore.service`, which turns the kill switch back on after a reboot if it was on before (nftables rules don't survive a reboot on their own). It runs once the boot-time VPN connect has finished, since the kill switch would block the connect itself, so traffic isn't blocked during the first ~20s of boot.
+4. Configure sudoers (via `install-secure-sudoers.sh`) so the applet's kill switch and watchdog controls work without a password prompt
+5. Optionally enable kill switch (blocks non-VPN traffic)
+6. Optionally enable watchdog service (auto-recovery)
 
 ### Kill Switch Commands
 ```bash
@@ -264,6 +265,7 @@ Metrics are stored in `/var/lib/pia/metrics/vpn-metrics.log` with automatic rota
 * `pia-token-renew.timer` - Renews token every 23 hours
 * `pia-port-forward.service` - Maintains port forwarding
 * `pia-suspend.service` - Handles suspend/resume events
+* `pia-killswitch-restore.service` - Re-enables the kill switch after boot if it was on before the reboot (installed by `install-security-features.sh`)
 
 ## Configuration Options
 

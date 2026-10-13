@@ -159,6 +159,36 @@ disable_killswitch() {
     fi
 }
 
+# Restore kill switch on boot (pia-killswitch-restore.service)
+#
+# nftables rules live only in kernel memory, so the table is gone after
+# every reboot - KILLSWITCH_ENABLED_FILE alone never brought it back. Also
+# honours the applet's and watchdog's "was enabled" markers: both disable
+# the kill switch (which removes KILLSWITCH_ENABLED_FILE) around a
+# reconnect, so a reboot mid-reconnect would otherwise lose the setting.
+# Those markers are only read here - their owners still clear them.
+#
+# Runs after pia-vpn.service rather than before the network comes up,
+# because the ruleset doesn't let the connect path through: the PIA server
+# list / token APIs and the chosen WireGuard server are not in the
+# allowlist, which is why the applet and watchdog also disable the kill
+# switch around every (re)connect. Loading it first would block the boot
+# connect. It also means detect_local_network() sees the real LAN.
+restore_killswitch() {
+    if nft list table inet pia_killswitch &>/dev/null; then
+        echo "Kill switch already active"
+        return 0
+    fi
+    if [ -f "$KILLSWITCH_ENABLED_FILE" ] \
+       || [ -f /var/lib/pia/killswitch-was-enabled ] \
+       || [ -f /var/lib/pia/killswitch-was-enabled-watchdog ]; then
+        echo "Kill switch was enabled before reboot, restoring..."
+        enable_killswitch
+    else
+        echo "Kill switch not configured to start on boot, leaving it off"
+    fi
+}
+
 # Check kill switch status
 status_killswitch() {
     echo "PIA VPN Kill Switch Status"
@@ -298,18 +328,22 @@ case "${1:-}" in
     status)
         status_killswitch
         ;;
+    restore)
+        restore_killswitch
+        ;;
     test)
         test_killswitch
         ;;
     *)
         echo "PIA VPN Kill Switch"
         echo
-        echo "Usage: $0 {enable|disable|status|test}"
+        echo "Usage: $0 {enable|disable|status|restore|test}"
         echo
         echo "Commands:"
         echo "  enable   - Enable kill switch (blocks all non-VPN traffic)"
         echo "  disable  - Disable kill switch (restore normal traffic)"
         echo "  status   - Show kill switch status and rules"
+        echo "  restore  - Re-enable on boot if it was enabled before (used by systemd)"
         echo "  test     - Test kill switch functionality"
         echo
         echo "Examples:"

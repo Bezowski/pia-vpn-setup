@@ -1,0 +1,17 @@
+[Unit]
+Description=Restore PIA VPN kill switch after boot
+# After pia-vpn.service, not before the network: the kill switch ruleset
+# blocks the PIA API calls the boot connect needs (see restore_killswitch()
+# in pia-killswitch.sh). Wants= rather than Requires= so the kill switch is
+# still restored (failing closed) if the VPN connect fails - the watchdog
+# then handles recovery the same way it does for any other outage.
+After=network-online.target pia-vpn.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pia-killswitch.sh restore
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -33,7 +33,9 @@ systemctl stop pia-watchdog.service 2>/dev/null || true
 systemctl stop pia-split-tunnel-watch.service 2>/dev/null || true
 systemctl disable pia-watchdog.service 2>/dev/null || true
 systemctl disable pia-split-tunnel-watch.service 2>/dev/null || true
+systemctl disable pia-killswitch-restore.service 2>/dev/null || true
 rm -f /etc/systemd/system/pia-watchdog.service
+rm -f /etc/systemd/system/pia-killswitch-restore.service
 rm -f /etc/systemd/system/pia-split-tunnel-watch.service
 echo "✓ Watchdog services stopped, disabled, and removed"
 
