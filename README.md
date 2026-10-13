@@ -132,9 +132,10 @@ This will:
 1. Install kill switch script (`pia-killswitch.sh`)
 2. Install watchdog script and service (`pia-watchdog.sh`)
 3. Install `pia-killswitch-restore.service`, which turns the kill switch back on after a reboot if it was on before (nftables rules don't survive a reboot on their own). It runs once the boot-time VPN connect has finished, since the kill switch would block the connect itself, so traffic isn't blocked during the first ~20s of boot.
-4. Configure sudoers (via `install-secure-sudoers.sh`) so the applet's kill switch and watchdog controls work without a password prompt
-5. Optionally enable kill switch (blocks non-VPN traffic)
-6. Optionally enable watchdog service (auto-recovery)
+4. Turn off NetworkManager's connectivity check (`/etc/NetworkManager/conf.d/99-pia-no-connectivity-check.conf`). The check deliberately goes out the physical interface, around the VPN, so it reveals your real IP to Canonical every few minutes. With the kill switch on, it's blocked and NetworkManager reports "limited" connectivity. The only loss is captive-portal (hotel Wi-Fi) login detection.
+5. Configure sudoers (via `install-secure-sudoers.sh`) so the applet's kill switch and watchdog controls work without a password prompt
+6. Optionally enable kill switch (blocks non-VPN traffic)
+7. Optionally enable watchdog service (auto-recovery)
 
 ### Kill Switch Commands
 ```bash

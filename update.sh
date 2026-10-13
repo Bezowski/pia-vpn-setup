@@ -88,6 +88,15 @@ done
 echo "Updating logrotate config..."
 update_file config/pia-vpn /etc/logrotate.d/pia-vpn 644
 
+NM_CONF=/etc/NetworkManager/conf.d/99-pia-no-connectivity-check.conf
+NM_CHANGED=false
+if [ -f /usr/local/bin/pia-killswitch.sh ] && [ -d /etc/NetworkManager/conf.d ]; then
+    echo "Updating NetworkManager config..."
+    before=${#CHANGED[@]}
+    update_file config/99-pia-no-connectivity-check.conf "$NM_CONF" 644
+    [ "${#CHANGED[@]}" -ne "$before" ] && NM_CHANGED=true
+fi
+
 # Sudoers: only the extended (security-features) set can be regenerated
 # here - the base set lives inline in install.sh.
 if grep -qs 'PIA_KILLSWITCH' /etc/sudoers.d/pia-vpn; then
@@ -117,6 +126,11 @@ fi
 
 echo "Reloading systemd..."
 systemctl daemon-reload
+
+if [ "$NM_CHANGED" = true ]; then
+    echo "Reloading NetworkManager config..."
+    systemctl reload NetworkManager || true
+fi
 
 if [ -f /etc/systemd/system/pia-killswitch-restore.service ] \
    && ! systemctl is-enabled --quiet pia-killswitch-restore.service; then

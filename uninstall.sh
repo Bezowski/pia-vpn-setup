@@ -165,6 +165,12 @@ echo "✓ Firewall rules removed"
 # Remove logrotate config installed by install.sh
 rm -f /etc/logrotate.d/pia-vpn
 
+# Remove NetworkManager config installed by install-security-features.sh
+if [ -f /etc/NetworkManager/conf.d/99-pia-no-connectivity-check.conf ]; then
+    rm -f /etc/NetworkManager/conf.d/99-pia-no-connectivity-check.conf
+    systemctl reload NetworkManager 2>/dev/null || true
+fi
+
 echo
 echo "=== Uninstallation Complete ==="
 echo

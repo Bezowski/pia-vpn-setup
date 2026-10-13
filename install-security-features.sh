@@ -72,6 +72,16 @@ else
     exit 1
 fi
 
+# Stop NetworkManager's connectivity check - it goes out the physical
+# interface (bypassing the VPN), so the kill switch drops it and NM reports
+# "limited" connectivity. See the comments in the config file.
+if [ -d /etc/NetworkManager/conf.d ]; then
+    cp config/99-pia-no-connectivity-check.conf /etc/NetworkManager/conf.d/
+    chmod 644 /etc/NetworkManager/conf.d/99-pia-no-connectivity-check.conf
+    systemctl reload NetworkManager 2>/dev/null || true
+    echo "✓ NetworkManager connectivity check disabled"
+fi
+
 # Extend sudoers for kill switch / watchdog / marker-file control. Without
 # this, the Cinnamon applet's sudo -n calls for pia-killswitch.sh,
 # pia-watchdog.sh, nft list tables, and the killswitch-was-enabled marker
