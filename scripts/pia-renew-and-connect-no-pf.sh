@@ -128,7 +128,12 @@ set +e
 REGION_OUTPUT=$(./get_region.sh 2>&1)
 region_exit=$?
 set -e
-echo "$REGION_OUTPUT"
+# Redact the PIA auth token (128 hex chars) before printing: get_region.sh
+# and get_token.sh echo it several times, and this output goes to the
+# journal, which adm-group users can read. Matched as a bare hex run rather
+# than by "PIA_TOKEN=" because get_region.sh wraps some copies in colour
+# codes. $REGION_OUTPUT itself is left intact for the parsing below.
+echo "$REGION_OUTPUT" | sed -E 's/[0-9a-f]{64,}/<redacted>/g'
 if [ "$region_exit" -ne 0 ]; then
   echo "❌ get_region.sh failed (exit $region_exit), aborting connect" >&2
   exit "$region_exit"
