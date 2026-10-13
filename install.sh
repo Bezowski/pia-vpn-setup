@@ -195,8 +195,17 @@ Cmnd_Alias PIA_CHMOD = /bin/chmod 600 /etc/pia-credentials, \
                           PIA_WG, PIA_EDITOR, PIA_CHMOD
 EOF
 
+# Don't downgrade: if install-security-features.sh has already extended this
+# file (kill switch / watchdog / nft list / marker rules), overwriting it with
+# the base set above silently breaks every applet sudo -n call for those -
+# re-run the extended installer instead, which writes a superset of the above.
+if [ -f "$SUDOERS_FILE" ] && grep -q 'PIA_KILLSWITCH' "$SUDOERS_FILE" \
+   && [ -f "install-secure-sudoers.sh" ]; then
+    rm -f /tmp/pia-sudoers-tmp
+    echo "Existing sudoers has kill switch/watchdog rules - keeping them..."
+    bash install-secure-sudoers.sh
 # Validate sudoers syntax before installing
-if visudo -c -f /tmp/pia-sudoers-tmp >/dev/null 2>&1; then
+elif visudo -c -f /tmp/pia-sudoers-tmp >/dev/null 2>&1; then
     mv /tmp/pia-sudoers-tmp "$SUDOERS_FILE"
     chmod 0440 "$SUDOERS_FILE"
     echo "✓ Sudoers configured successfully (restricted to specific commands)"
