@@ -16,6 +16,11 @@ ExecStart=/bin/bash /usr/local/bin/pia-renew-and-connect-no-pf.sh
 # tunneling was never set up (see pia-split-tunnel.sh reapply). The leading
 # "-" means a failure here won't fail the whole VPN service.
 ExecStartPost=-/usr/local/bin/pia-split-tunnel.sh reapply
+# Turn the kill switch back on as soon as the connect succeeds, if a
+# reconnect path (suspend handler, watchdog, applet) disabled it to let the
+# connect through. No-op if it was never enabled or the kill switch isn't
+# installed; without this, resume relies on the watchdog's next 60s poll.
+ExecStartPost=-/usr/local/bin/pia-killswitch.sh restore
 Restart=on-failure
 RestartSec=10
 

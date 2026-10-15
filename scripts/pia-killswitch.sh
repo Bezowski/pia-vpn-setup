@@ -159,7 +159,8 @@ disable_killswitch() {
     fi
 }
 
-# Restore kill switch on boot (pia-killswitch-restore.service)
+# Restore kill switch on boot (pia-killswitch-restore.service) and after
+# every successful connect (pia-vpn.service's ExecStartPost)
 #
 # nftables rules live only in kernel memory, so the table is gone after
 # every reboot - KILLSWITCH_ENABLED_FILE alone never brought it back. Also

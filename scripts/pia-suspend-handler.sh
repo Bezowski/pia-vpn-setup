@@ -75,7 +75,20 @@ restart_port_forwarding() {
 # Helper function: Full VPN reconnection
 reconnect_vpn() {
   echo "===== Starting full VPN reconnection ====="
-  
+
+  # The kill switch ruleset blocks the PIA server-list/token APIs the
+  # connect needs, so a reconnect with it on hangs until pia-vpn.service is
+  # killed, leaving no VPN and no internet. Disable it like the watchdog's
+  # recover_vpn() does, using the watchdog's marker (written before disable,
+  # for the same reason as there): pia-vpn.service's ExecStartPost restore
+  # re-enables it as soon as the connect succeeds, and the watchdog's
+  # maybe_reenable_killswitch() clears the marker once the VPN is healthy.
+  if nft list table inet pia_killswitch &>/dev/null; then
+    echo "Kill switch is on, temporarily disabling for reconnect..."
+    touch /var/lib/pia/killswitch-was-enabled-watchdog
+    /usr/local/bin/pia-killswitch.sh disable || true
+  fi
+
   # Step 1: Disconnect current VPN
   echo "Step 1: Stopping VPN interface..."
   wg-quick down pia 2>/dev/null || {
