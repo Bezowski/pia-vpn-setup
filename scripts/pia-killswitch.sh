@@ -79,6 +79,13 @@ table inet pia_killswitch {
         # Allow VPN interface (oifname, not oif - matches by name so the
         # ruleset still loads even when "pia" doesn't exist yet, e.g. VPN down)
         oifname "pia" accept
+
+        # Allow host -> Docker containers (docker0 and user-defined
+        # "br-*" bridge networks, e.g. 172.17/16, 172.18/16). This traffic
+        # never leaves the machine; containers' own egress is forwarded and
+        # still only allowed out "pia" by the forward chain below.
+        oifname "docker0" accept
+        oifname "br-*" accept
         
         # Allow split-tunnel bypass traffic (see pia-split-tunnel.sh).
         # Packets from the bypass user are marked and routed out the
@@ -104,9 +111,20 @@ table inet pia_killswitch {
     chain forward {
         type filter hook forward priority -100; policy drop;
         
+        # Replies to forwarded connections allowed below (e.g. a container
+        # answering a LAN client on a published port)
+        ct state established,related accept
+
         # Allow VPN forwarding (iifname/oifname - see note above)
         iifname "pia" accept
         oifname "pia" accept
+
+        # Allow traffic into Docker containers (LAN clients reaching
+        # published ports via DNAT) and between Docker bridge networks.
+        # Container-initiated traffic to anything else still only goes out
+        # via "pia" above.
+        oifname "docker0" accept
+        oifname "br-*" accept
         
         # Drop everything else
         drop
