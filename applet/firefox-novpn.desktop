@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Firefox (No VPN)
+Comment=Launch Firefox outside the PIA VPN tunnel (split tunnel bypass)
+Exec=sudo -n /usr/local/bin/pia-split-tunnel.sh launch firefox --name firefox-novpn --class firefox-novpn %u
+Icon=firefox
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+StartupWMClass=firefox-novpn

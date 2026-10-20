@@ -197,11 +197,14 @@ sudo -u novpn env DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY firefox
 
 ### Desktop launcher (GUI shortcut)
 
-To add a menu shortcut like the bundled Edge one:
+To add a menu shortcut like the bundled Edge or Firefox ones:
 
 ```bash
 cp applet/microsoft-edge-novpn.desktop ~/.local/share/applications/
+cp applet/firefox-novpn.desktop ~/.local/share/applications/
 ```
+
+The Firefox launcher passes `--name`/`--class firefox-novpn` so the bypass window gets its own taskbar entry instead of being grouped with your normal (VPN) Firefox. It runs as `novpn` with its own profile in `/home/novpn`, so your usual bookmarks, logins and extensions aren't there.
 
 Its `Exec=` line calls `sudo -n pia-split-tunnel.sh launch ...` — the `-n` means it fails silently (no error dialog) instead of hanging on a password prompt, since a desktop launcher has no terminal to type one into. That only works with a matching NOPASSWD sudoers rule, which isn't installed by any of the installer scripts yet (split tunneling as a whole is set up manually, not via `install.sh`). Add one per app you want to launch this way:
 
